@@ -15,9 +15,11 @@ Implemented in `lvau-core`:
 - canonical chunk AAD binding the suite, layer, envelope commitment, chunk
   index, plaintext length, inner length, ciphertext length, and final marker;
 - a bounded single-chunk `LV3-XC20P` encrypt/decrypt primitive;
+- a strict 1 MiB plaintext cap enforced before AEAD processing, including when
+  callers construct a descriptor without using its checked constructor;
 - fixed key, nonce, and AAD vectors;
 - negative tests for tampering, chunk-index changes, final-marker changes,
-  length mismatches, and legacy-suite confusion.
+  length mismatches, oversized chunks, and legacy-suite confusion.
 
 Not implemented yet:
 
