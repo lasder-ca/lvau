@@ -440,13 +440,7 @@ mod tests {
             final_chunk: true,
         };
         assert!(matches!(
-            decrypt_xchacha_chunk(
-                &[0x01; 32],
-                &[0x02; 24],
-                &[0x03; 32],
-                descriptor,
-                &[],
-            ),
+            decrypt_xchacha_chunk(&[0x01; 32], &[0x02; 24], &[0x03; 32], descriptor, &[],),
             Err(CryptoError::Validation(
                 "v3 chunk plaintext exceeds the format limit"
             ))
