@@ -726,7 +726,7 @@ impl eframe::App for LvauGuiApp {
                         ui.spinner();
                         ui.label(format!("Processed {}", format_bytes(self.processed_bytes)));
                     });
-                    if self.mode != OperationMode::Inspect {
+                    if self.mode == OperationMode::Encrypt {
                         if let Some(total) = self
                             .in_file
                             .as_ref()
