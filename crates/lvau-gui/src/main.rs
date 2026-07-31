@@ -186,13 +186,12 @@ impl LvauGuiApp {
             return None;
         }
         match self.auth_mode {
-            AuthMode::Password => validate_password_fields(
-                self.mode,
-                &self.secret,
-                &self.secret_confirmation,
-            )
-            .err(),
-            AuthMode::KeyFile if self.keyfile_path.is_none() => Some("Select the required key file"),
+            AuthMode::Password => {
+                validate_password_fields(self.mode, &self.secret, &self.secret_confirmation).err()
+            }
+            AuthMode::KeyFile if self.keyfile_path.is_none() => {
+                Some("Select the required key file")
+            }
             AuthMode::KeyFile => None,
         }
     }
