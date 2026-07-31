@@ -14,7 +14,7 @@ use lvau_protocol::envelope::AlgorithmId;
 pub enum SuiteId {
     V2XChaCha20Poly1305,
     V2AesGcmXChaCha20Poly1305,
-    V2AesGcmXCha20Poly1305Lco,
+    V2AesGcmXChaCha20Poly1305Lco,
     V3XChaCha20Poly1305,
     V3Aes256GcmSivXChaCha20Poly1305,
 }
@@ -57,7 +57,7 @@ impl CryptoSuite {
                 includes_legacy_obfuscation: false,
             }),
             AlgorithmId::TripleCascadeAesXChaChaLco => Some(Self {
-                id: SuiteId::V2AesGcmXCha20Poly1305Lco,
+                id: SuiteId::V2AesGcmXChaCha20Poly1305Lco,
                 format_version: 2,
                 // LCO is reversible obfuscation, not an encryption layer.
                 layer_count: 2,
