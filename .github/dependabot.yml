@@ -6,13 +6,13 @@ updates:
       interval: monthly
       time: "09:00"
       timezone: Asia/Tokyo
-    # Keep security updates available while pausing routine version-update PRs.
-    open-pull-requests-limit: 0
+    # Surface a small number of routine updates for explicit review; never auto-merge them.
+    open-pull-requests-limit: 3
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
       time: "09:00"
       timezone: Asia/Tokyo
-    # Keep security updates available while pausing routine version-update PRs.
-    open-pull-requests-limit: 0
+    # Surface a small number of routine updates for explicit review; never auto-merge them.
+    open-pull-requests-limit: 3
