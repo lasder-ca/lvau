@@ -427,6 +427,53 @@ mod tests {
     }
 
     #[test]
+    fn xchacha_chunk_rejects_a_different_suite_domain() {
+        let root_key = [0x31; 32];
+        let base_nonce = [0x72; 24];
+        let commitment = [0xA4; 32];
+        let plaintext = b"suite-bound payload";
+        let descriptor =
+            V3ChunkDescriptor::new(3, plaintext.len(), true).expect("valid descriptor");
+        let ciphertext_len = checked_single_layer_ciphertext_len(descriptor.plaintext_len)
+            .expect("valid ciphertext length");
+
+        // Keep the purpose, layer, and chunk context identical so only the
+        // suite identity changes the key, nonce, and AAD domains.
+        let suite = V3SuiteId::Aes256GcmSivXChaCha20Poly1305;
+        let key = derive_subkey(&root_key, suite, V3KeyPurpose::PayloadSingle)
+            .expect("derive cross-suite test key");
+        let nonce = derive_xchacha_nonce(&base_nonce, suite, V3Layer::Single, descriptor.index)
+            .expect("derive cross-suite test nonce");
+        let aad = chunk_aad(
+            suite,
+            V3Layer::Single,
+            &commitment,
+            descriptor,
+            0,
+            ciphertext_len,
+        );
+        let cipher = XChaCha20Poly1305::new(key.as_ref().into());
+        let ciphertext = cipher
+            .encrypt(
+                &XNonce::from(nonce),
+                Payload {
+                    msg: plaintext,
+                    aad: &aad,
+                },
+            )
+            .expect("encrypt under alternate suite domain");
+
+        assert!(decrypt_xchacha_chunk(
+            &root_key,
+            &base_nonce,
+            &commitment,
+            descriptor,
+            &ciphertext,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn descriptor_length_mismatch_fails_before_encryption() {
         let descriptor = V3ChunkDescriptor::new(0, 2, true).expect("valid descriptor");
         assert!(
