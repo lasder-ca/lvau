@@ -51,9 +51,7 @@ impl V3KeyPurpose {
         match self {
             Self::PayloadSingle => b"payload-single",
             Self::PayloadInnerAes256GcmSiv => b"payload-inner-aes-256-gcm-siv",
-            Self::PayloadOuterXChaCha20Poly1305 => {
-                b"payload-outer-xchacha20-poly1305"
-            }
+            Self::PayloadOuterXChaCha20Poly1305 => b"payload-outer-xchacha20-poly1305",
             Self::RecipientWrap => b"recipient-wrap",
             Self::EnvelopeCommitment => b"envelope-commitment",
             Self::BundleManifest => b"bundle-manifest",
@@ -72,11 +70,7 @@ pub struct V3ChunkDescriptor {
 }
 
 impl V3ChunkDescriptor {
-    pub fn new(
-        index: u64,
-        plaintext_len: usize,
-        final_chunk: bool,
-    ) -> Result<Self, CryptoError> {
+    pub fn new(index: u64, plaintext_len: usize, final_chunk: bool) -> Result<Self, CryptoError> {
         let plaintext_len = u32::try_from(plaintext_len)
             .map_err(|_| CryptoError::Validation("v3 chunk plaintext is too large"))?;
         Ok(Self {
@@ -198,7 +192,9 @@ pub fn chunk_aad(
 fn checked_single_layer_ciphertext_len(plaintext_len: u32) -> Result<u32, CryptoError> {
     plaintext_len
         .checked_add(XCHACHA_TAG_LEN as u32)
-        .ok_or(CryptoError::Validation("v3 chunk ciphertext length overflow"))
+        .ok_or(CryptoError::Validation(
+            "v3 chunk ciphertext length overflow",
+        ))
 }
 
 /// Encrypt one v3 `LV3-XC20P` chunk.
@@ -284,8 +280,7 @@ pub fn decrypt_xchacha_chunk(
         .map_err(|_| CryptoError::DecryptionFailed)?;
 
     if plaintext.len()
-        != usize::try_from(descriptor.plaintext_len)
-            .map_err(|_| CryptoError::DecryptionFailed)?
+        != usize::try_from(descriptor.plaintext_len).map_err(|_| CryptoError::DecryptionFailed)?
     {
         return Err(CryptoError::DecryptionFailed);
     }
@@ -373,24 +368,14 @@ mod tests {
         let descriptor =
             V3ChunkDescriptor::new(7, plaintext.len(), true).expect("valid descriptor");
 
-        let ciphertext = encrypt_xchacha_chunk(
-            &root_key,
-            &base_nonce,
-            &commitment,
-            descriptor,
-            plaintext,
-        )
-        .expect("encrypt chunk");
+        let ciphertext =
+            encrypt_xchacha_chunk(&root_key, &base_nonce, &commitment, descriptor, plaintext)
+                .expect("encrypt chunk");
         assert_eq!(ciphertext.len(), plaintext.len() + XCHACHA_TAG_LEN);
 
-        let decrypted = decrypt_xchacha_chunk(
-            &root_key,
-            &base_nonce,
-            &commitment,
-            descriptor,
-            &ciphertext,
-        )
-        .expect("decrypt chunk");
+        let decrypted =
+            decrypt_xchacha_chunk(&root_key, &base_nonce, &commitment, descriptor, &ciphertext)
+                .expect("decrypt chunk");
         assert_eq!(decrypted, plaintext);
 
         let wrong_index =
@@ -417,38 +402,27 @@ mod tests {
 
         let mut tampered = ciphertext;
         tampered[0] ^= 1;
-        assert!(decrypt_xchacha_chunk(
-            &root_key,
-            &base_nonce,
-            &commitment,
-            descriptor,
-            &tampered,
-        )
-        .is_err());
+        assert!(
+            decrypt_xchacha_chunk(&root_key, &base_nonce, &commitment, descriptor, &tampered,)
+                .is_err()
+        );
     }
 
     #[test]
     fn descriptor_length_mismatch_fails_before_encryption() {
         let descriptor = V3ChunkDescriptor::new(0, 2, true).expect("valid descriptor");
-        assert!(encrypt_xchacha_chunk(
-            &[0x01; 32],
-            &[0x02; 24],
-            &[0x03; 32],
-            descriptor,
-            b"one",
-        )
-        .is_err());
+        assert!(
+            encrypt_xchacha_chunk(&[0x01; 32], &[0x02; 24], &[0x03; 32], descriptor, b"one",)
+                .is_err()
+        );
     }
 
     #[test]
     fn legacy_suite_ids_fail_closed() {
         assert!(suite_wire_name(SuiteId::V2XChaCha20Poly1305).is_err());
-        assert!(derive_xchacha_nonce(
-            &[0; 24],
-            SuiteId::V2XChaCha20Poly1305,
-            V3Layer::Single,
-            0,
-        )
-        .is_err());
+        assert!(
+            derive_xchacha_nonce(&[0; 24], SuiteId::V2XChaCha20Poly1305, V3Layer::Single, 0,)
+                .is_err()
+        );
     }
 }
