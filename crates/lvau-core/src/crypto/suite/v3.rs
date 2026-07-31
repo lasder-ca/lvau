@@ -23,6 +23,8 @@ const SUBKEY_INFO_DOMAIN: &[u8] = b"Lvau v3 subkey\0";
 const NONCE_SCHEDULE_DOMAIN: &[u8] = b"Lvau v3 nonce schedule\0";
 const CHUNK_AAD_DOMAIN: &[u8] = b"Lvau v3 chunk AAD\0";
 const XCHACHA_TAG_LEN: usize = 16;
+/// Maximum plaintext bytes accepted by one format-v3 chunk primitive.
+pub const V3_MAX_CHUNK_PLAINTEXT_LEN: usize = 1024 * 1024;
 
 /// The layer position committed by a v3 chunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +75,7 @@ impl V3ChunkDescriptor {
     pub fn new(index: u64, plaintext_len: usize, final_chunk: bool) -> Result<Self, CryptoError> {
         let plaintext_len = u32::try_from(plaintext_len)
             .map_err(|_| CryptoError::Validation("v3 chunk plaintext is too large"))?;
+        validate_plaintext_len(plaintext_len)?;
         Ok(Self {
             index,
             plaintext_len,
@@ -189,6 +192,17 @@ pub fn chunk_aad(
     Ok(aad)
 }
 
+fn validate_plaintext_len(plaintext_len: u32) -> Result<usize, CryptoError> {
+    let plaintext_len = usize::try_from(plaintext_len)
+        .map_err(|_| CryptoError::Validation("v3 chunk plaintext length is invalid"))?;
+    if plaintext_len > V3_MAX_CHUNK_PLAINTEXT_LEN {
+        return Err(CryptoError::Validation(
+            "v3 chunk plaintext exceeds the format limit",
+        ));
+    }
+    Ok(plaintext_len)
+}
+
 fn checked_single_layer_ciphertext_len(plaintext_len: u32) -> Result<u32, CryptoError> {
     plaintext_len
         .checked_add(XCHACHA_TAG_LEN as u32)
@@ -208,8 +222,7 @@ pub fn encrypt_xchacha_chunk(
     descriptor: V3ChunkDescriptor,
     plaintext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
-    let plaintext_len = usize::try_from(descriptor.plaintext_len)
-        .map_err(|_| CryptoError::Validation("v3 chunk plaintext length is invalid"))?;
+    let plaintext_len = validate_plaintext_len(descriptor.plaintext_len)?;
     if plaintext.len() != plaintext_len {
         return Err(CryptoError::Validation(
             "v3 chunk plaintext length does not match its descriptor",
@@ -249,6 +262,7 @@ pub fn decrypt_xchacha_chunk(
     descriptor: V3ChunkDescriptor,
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
+    let plaintext_len = validate_plaintext_len(descriptor.plaintext_len)?;
     let expected_len = checked_single_layer_ciphertext_len(descriptor.plaintext_len)?;
     let actual_len = u32::try_from(ciphertext.len())
         .map_err(|_| CryptoError::Validation("v3 chunk ciphertext is too large"))?;
@@ -279,9 +293,7 @@ pub fn decrypt_xchacha_chunk(
         )
         .map_err(|_| CryptoError::DecryptionFailed)?;
 
-    if plaintext.len()
-        != usize::try_from(descriptor.plaintext_len).map_err(|_| CryptoError::DecryptionFailed)?
-    {
+    if plaintext.len() != plaintext_len {
         return Err(CryptoError::DecryptionFailed);
     }
 
@@ -415,6 +427,30 @@ mod tests {
             encrypt_xchacha_chunk(&[0x01; 32], &[0x02; 24], &[0x03; 32], descriptor, b"one",)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn oversized_chunks_fail_before_aead_processing() {
+        let oversized_len = V3_MAX_CHUNK_PLAINTEXT_LEN + 1;
+        assert!(V3ChunkDescriptor::new(0, oversized_len, true).is_err());
+
+        let descriptor = V3ChunkDescriptor {
+            index: 0,
+            plaintext_len: u32::try_from(oversized_len).expect("test length fits u32"),
+            final_chunk: true,
+        };
+        assert!(matches!(
+            decrypt_xchacha_chunk(
+                &[0x01; 32],
+                &[0x02; 24],
+                &[0x03; 32],
+                descriptor,
+                &[],
+            ),
+            Err(CryptoError::Validation(
+                "v3 chunk plaintext exceeds the format limit"
+            ))
+        ));
     }
 
     #[test]
