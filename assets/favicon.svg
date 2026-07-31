@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Lvau</title>
+  <path fill="#25384f" d="M256 54 412 111v119c0 105-61 181-156 228C161 411 100 335 100 230V111L256 54Z"/>
+  <path fill="#9fd8d1" d="M190 151h58v181c0 18 14 32 32 32 41 0 74-31 95-76l53 25c-31 67-82 109-148 109-50 0-90-40-90-90V151Z"/>
+  <path fill="#162438" d="M143 166a22 22 0 1 1 34 18l7 38h-38l7-38a22 22 0 0 1-10-18Z"/>
+  <rect x="321" y="179" width="38" height="38" rx="8" fill="#9fd8d1"/>
+  <rect x="370" y="151" width="25" height="25" rx="6" fill="#9fd8d1"/>
+  <rect x="403" y="126" width="16" height="16" rx="4" fill="#9fd8d1"/>
+</svg>
