@@ -152,8 +152,7 @@ mod tests {
         assert_eq!(single.tag_overhead_per_chunk, 16);
         assert!(single.experimental);
 
-        let layered =
-            V3CryptoSuite::for_suite(V3SuiteId::Aes256GcmSivXChaCha20Poly1305);
+        let layered = V3CryptoSuite::for_suite(V3SuiteId::Aes256GcmSivXChaCha20Poly1305);
         assert_eq!(layered.layer_count, 2);
         assert_eq!(layered.tag_overhead_per_chunk, 32);
         assert_eq!(layered.aes_nonce_len, Some(12));
