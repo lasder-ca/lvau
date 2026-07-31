@@ -2,12 +2,17 @@
 //!
 //! The registry describes wire-format capabilities without selecting new
 //! algorithms implicitly from broad security-profile names. Format v2 keeps its
-//! historical identifiers and byte layout; future formats must allocate new
-//! suite identifiers rather than reinterpret an existing one.
+//! historical identifiers and byte layout; future formats allocate separate
+//! identifier types rather than extending an existing public enum.
+
+pub mod v3;
 
 use lvau_protocol::envelope::AlgorithmId;
 
-/// Stable internal identifier for a payload suite.
+/// Stable internal identifier for a format-v2 payload suite.
+///
+/// This enum intentionally remains unchanged so downstream exhaustive matches
+/// written against Lvau 0.5 continue to compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SuiteId {
     V2XChaCha20Poly1305,
@@ -15,7 +20,7 @@ pub enum SuiteId {
     V2AesGcmXChaCha20Poly1305Lco,
 }
 
-/// Capabilities and framing constraints for a payload suite.
+/// Capabilities and framing constraints for a format-v2 payload suite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CryptoSuite {
     pub id: SuiteId,
@@ -68,6 +73,59 @@ impl CryptoSuite {
     }
 }
 
+/// Experimental format-v3 payload-suite identifier.
+///
+/// This is a separate type so adding v3 suites cannot break exhaustive matches
+/// over the stable format-v2 [`SuiteId`] enum. It is non-exhaustive from its
+/// first release because the v3 registry is expected to grow.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum V3SuiteId {
+    XChaCha20Poly1305,
+    Aes256GcmSivXChaCha20Poly1305,
+}
+
+/// Capabilities and framing constraints for an experimental v3 payload suite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3CryptoSuite {
+    pub id: V3SuiteId,
+    pub format_version: u16,
+    pub layer_count: u8,
+    pub xchacha_nonce_len: usize,
+    pub aes_nonce_len: Option<usize>,
+    pub tag_overhead_per_chunk: usize,
+    pub experimental: bool,
+}
+
+impl V3CryptoSuite {
+    /// Resolve an experimental format-v3 payload suite.
+    ///
+    /// This metadata does not make v3 writable. The envelope parser, writer,
+    /// and CLI opt-in remain separate promotion gates.
+    pub const fn for_suite(id: V3SuiteId) -> Self {
+        match id {
+            V3SuiteId::XChaCha20Poly1305 => Self {
+                id,
+                format_version: 3,
+                layer_count: 1,
+                xchacha_nonce_len: 24,
+                aes_nonce_len: None,
+                tag_overhead_per_chunk: 16,
+                experimental: true,
+            },
+            V3SuiteId::Aes256GcmSivXChaCha20Poly1305 => Self {
+                id,
+                format_version: 3,
+                layer_count: 2,
+                xchacha_nonce_len: 24,
+                aes_nonce_len: Some(12),
+                tag_overhead_per_chunk: 32,
+                experimental: true,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +142,29 @@ mod tests {
     fn recipient_and_signature_ids_are_not_payload_suites() {
         assert!(CryptoSuite::for_v2_algorithm(&AlgorithmId::X25519MlkemHybrid).is_none());
         assert!(CryptoSuite::for_v2_algorithm(&AlgorithmId::Ed25519).is_none());
+    }
+
+    #[test]
+    fn v3_suites_are_explicit_and_do_not_include_lco() {
+        let single = V3CryptoSuite::for_suite(V3SuiteId::XChaCha20Poly1305);
+        assert_eq!(single.format_version, 3);
+        assert_eq!(single.layer_count, 1);
+        assert_eq!(single.tag_overhead_per_chunk, 16);
+        assert!(single.experimental);
+
+        let layered = V3CryptoSuite::for_suite(V3SuiteId::Aes256GcmSivXChaCha20Poly1305);
+        assert_eq!(layered.layer_count, 2);
+        assert_eq!(layered.tag_overhead_per_chunk, 32);
+        assert_eq!(layered.aes_nonce_len, Some(12));
+    }
+
+    #[test]
+    fn v2_registry_remains_the_original_three_variant_type() {
+        let suites = [
+            SuiteId::V2XChaCha20Poly1305,
+            SuiteId::V2AesGcmXChaCha20Poly1305,
+            SuiteId::V2AesGcmXChaCha20Poly1305Lco,
+        ];
+        assert_eq!(suites.len(), 3);
     }
 }
