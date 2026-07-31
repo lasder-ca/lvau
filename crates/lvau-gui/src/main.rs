@@ -21,7 +21,6 @@ use tempfile::NamedTempFile;
 use zeroize::Zeroize;
 
 const MAX_GUI_LOG_BYTES: usize = 64 * 1024;
-const CONTENT_WIDTH: f32 = 720.0;
 
 struct GuiLogger {
     logs: Arc<Mutex<String>>,
@@ -62,24 +61,6 @@ enum OperationMode {
     Encrypt,
     Decrypt,
     Inspect,
-}
-
-impl OperationMode {
-    fn action_label(self) -> &'static str {
-        match self {
-            Self::Encrypt => "Encrypt and save",
-            Self::Decrypt => "Decrypt and save",
-            Self::Inspect => "Inspect envelope",
-        }
-    }
-
-    fn description(self) -> &'static str {
-        match self {
-            Self::Encrypt => "Create a new encrypted .lvau file from a local file.",
-            Self::Decrypt => "Authenticate and restore a local file from a .lvau file.",
-            Self::Inspect => "Read envelope metadata and policy results without decrypting content.",
-        }
-    }
 }
 
 enum Credential {
@@ -191,15 +172,6 @@ impl LvauGuiApp {
         }
     }
 
-    fn handle_mode_change(&mut self) {
-        self.keyfile_path = None;
-        self.secret_confirmation.zeroize();
-        self.status.clear();
-        if self.mode != OperationMode::Encrypt {
-            self.sfx = false;
-        }
-    }
-
     fn clear_sensitive_fields(&mut self) {
         self.secret.zeroize();
         self.secret_confirmation.zeroize();
@@ -208,12 +180,11 @@ impl LvauGuiApp {
 
     fn validation_error(&self) -> Option<&'static str> {
         if self.in_file.is_none() {
-            return Some("Select an input file to continue.");
+            return Some("Select an input file");
         }
         if self.mode == OperationMode::Inspect {
             return None;
         }
-
         match self.auth_mode {
             AuthMode::Password => validate_password_fields(
                 self.mode,
@@ -221,9 +192,7 @@ impl LvauGuiApp {
                 &self.secret_confirmation,
             )
             .err(),
-            AuthMode::KeyFile if self.keyfile_path.is_none() => {
-                Some("Select the required key file to continue.")
-            }
+            AuthMode::KeyFile if self.keyfile_path.is_none() => Some("Select the required key file"),
             AuthMode::KeyFile => None,
         }
     }
@@ -296,40 +265,6 @@ impl LvauGuiApp {
         self.clear_sensitive_fields();
         self.start_task(task);
     }
-
-    fn generate_keypair(&mut self) {
-        let dialog = rfd::FileDialog::new()
-            .set_title("Save Private Key")
-            .add_filter("Lvau Key", &["lvau-key"]);
-        let Some(private_path) = dialog.save_file() else {
-            return;
-        };
-        let public_path = private_path.with_extension("lvau-pub");
-        if private_path.exists() || public_path.exists() {
-            self.status = "Error: Refusing to overwrite an existing key file.".into();
-            return;
-        }
-
-        let (private_key, public_key) = generate_keypair();
-        self.status = match private_key.save_to_file(&private_path) {
-            Ok(()) => match public_key.save_to_file(&public_path) {
-                Ok(()) => format!(
-                    "Success: Experimental identity generated\nPrivate: {}\nPublic: {}",
-                    private_path.display(),
-                    public_path.display()
-                ),
-                Err(error) => format!("Error: Could not save public key: {error}"),
-            },
-            Err(error) => format!("Error: Could not save private key: {error}"),
-        };
-    }
-
-    fn input_size(&self) -> Option<u64> {
-        self.in_file
-            .as_ref()
-            .and_then(|path| fs::metadata(path).ok())
-            .map(|metadata| metadata.len())
-    }
 }
 
 fn validate_password_fields(
@@ -338,14 +273,14 @@ fn validate_password_fields(
     confirmation: &str,
 ) -> Result<(), &'static str> {
     if password.is_empty() {
-        return Err("Enter a password to continue.");
+        return Err("Enter a password");
     }
     if mode == OperationMode::Encrypt {
         if confirmation.is_empty() {
-            return Err("Confirm the password before encrypting.");
+            return Err("Confirm the password");
         }
         if password != confirmation {
-            return Err("Password confirmation does not match.");
+            return Err("Password confirmation does not match");
         }
     }
     Ok(())
@@ -587,27 +522,11 @@ fn build_sfx_file(
 }
 
 fn format_bytes(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = 1024 * KIB;
-    const GIB: u64 = 1024 * MIB;
-    if bytes >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB as f64)
-    } else if bytes >= MIB {
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= MIB {
         format!("{:.1} MiB", bytes as f64 / MIB as f64)
-    } else if bytes >= KIB {
-        format!("{:.1} KiB", bytes as f64 / KIB as f64)
     } else {
         format!("{bytes} bytes")
-    }
-}
-
-fn profile_description(profile: &SecurityProfile) -> &'static str {
-    match profile {
-        SecurityProfile::Fast => "Lower password cost for short-lived or low-risk local workflows.",
-        SecurityProfile::Balanced => "Recommended default for ordinary local file encryption.",
-        SecurityProfile::Archive => "Higher password cost for data kept for a long time.",
-        SecurityProfile::Paranoid => "Experimental cascade profile. More layers do not imply an audit.",
-        SecurityProfile::Extreme => "Experimental maximum-cost profile with substantial resource use.",
     }
 }
 
@@ -620,392 +539,254 @@ impl eframe::App for LvauGuiApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.set_max_width(CONTENT_WIDTH);
-                    ui.heading(format!("Lvau {}", env!("CARGO_PKG_VERSION")));
-                    ui.label("Local file encryption and envelope inspection");
-                });
-                ui.add_space(8.0);
-                ui.vertical_centered(|ui| {
-                    ui.set_max_width(CONTENT_WIDTH);
-                    ui.label(
-                        egui::RichText::new(
-                            "Experimental software; no formal independent security audit has been completed.",
-                        )
-                        .color(egui::Color32::YELLOW),
-                    );
-                });
+                ui.heading(format!("Lvau {} - Local File Encryption", env!("CARGO_PKG_VERSION")));
+                ui.label(
+                    egui::RichText::new(
+                        "Experimental software; no formal independent security audit has been completed.",
+                    )
+                    .color(egui::Color32::YELLOW),
+                );
                 ui.add_space(14.0);
 
-                ui.vertical_centered(|ui| {
-                    ui.set_max_width(CONTENT_WIDTH);
-                    ui.add_enabled_ui(!self.busy, |ui| {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.heading("1. Operation");
-                            let previous_mode = self.mode;
-                            ui.horizontal_wrapped(|ui| {
-                                ui.radio_value(&mut self.mode, OperationMode::Encrypt, "Encrypt");
-                                ui.radio_value(&mut self.mode, OperationMode::Decrypt, "Decrypt");
-                                ui.radio_value(&mut self.mode, OperationMode::Inspect, "Inspect");
-                            });
-                            if self.mode != previous_mode {
-                                self.handle_mode_change();
+                ui.add_enabled_ui(!self.busy, |ui| {
+                    if ui.button("Generate Experimental Hybrid Keypair...").clicked() {
+                        let dialog = rfd::FileDialog::new()
+                            .set_title("Save Private Key")
+                            .add_filter("Lvau Key", &["lvau-key"]);
+                        if let Some(private_path) = dialog.save_file() {
+                            let public_path = private_path.with_extension("lvau-pub");
+                            let (private_key, public_key) = generate_keypair();
+                            self.status = match private_key.save_to_file(&private_path) {
+                                Ok(()) => match public_key.save_to_file(&public_path) {
+                                    Ok(()) => format!(
+                                        "Success: Experimental identity generated\nPrivate: {}\nPublic: {}",
+                                        private_path.display(),
+                                        public_path.display()
+                                    ),
+                                    Err(error) => format!("Error: Could not save public key: {error}"),
+                                },
+                                Err(error) => format!("Error: Could not save private key: {error}"),
+                            };
+                        }
+                    }
+
+                    ui.add_space(14.0);
+                    let previous_mode = self.mode;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.radio_value(&mut self.mode, OperationMode::Encrypt, "Encrypt");
+                        ui.radio_value(&mut self.mode, OperationMode::Decrypt, "Decrypt");
+                        ui.radio_value(&mut self.mode, OperationMode::Inspect, "Inspect");
+                    });
+                    if self.mode != previous_mode {
+                        self.keyfile_path = None;
+                        self.secret_confirmation.zeroize();
+                        self.status.clear();
+                        if self.mode != OperationMode::Encrypt {
+                            self.sfx = false;
+                        }
+                    }
+
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Select Target File").clicked() {
+                            let mut dialog = rfd::FileDialog::new();
+                            if matches!(self.mode, OperationMode::Decrypt | OperationMode::Inspect) {
+                                dialog = dialog.add_filter("Lvau Encrypted", &["lvau"]);
                             }
-                            ui.label(egui::RichText::new(self.mode.description()).weak());
-                        });
-
-                        ui.add_space(10.0);
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.heading("2. Input file");
-                            ui.horizontal_wrapped(|ui| {
-                                let label = match self.mode {
-                                    OperationMode::Encrypt => "Choose file...",
-                                    OperationMode::Decrypt | OperationMode::Inspect => {
-                                        "Choose .lvau file..."
-                                    }
-                                };
-                                if ui.button(label).clicked() {
-                                    let mut dialog = rfd::FileDialog::new();
-                                    if matches!(
-                                        self.mode,
-                                        OperationMode::Decrypt | OperationMode::Inspect
-                                    ) {
-                                        dialog = dialog.add_filter("Lvau Encrypted", &["lvau"]);
-                                    }
-                                    if let Some(path) = dialog.pick_file() {
-                                        self.in_file = Some(path);
-                                        self.status.clear();
-                                    }
-                                }
-                                if self.in_file.is_some() && ui.button("Clear").clicked() {
-                                    self.in_file = None;
-                                    self.status.clear();
-                                }
-                            });
-                            if let Some(path) = &self.in_file {
-                                ui.add_space(4.0);
-                                ui.label(egui::RichText::new(path.display().to_string()).monospace());
-                                match fs::metadata(path) {
-                                    Ok(metadata) if metadata.is_file() => {
-                                        ui.label(format!("Size: {}", format_bytes(metadata.len())));
-                                    }
-                                    Ok(_) => {
-                                        ui.label(
-                                            egui::RichText::new("The selected path is not a regular file.")
-                                                .color(egui::Color32::YELLOW),
-                                        );
-                                    }
-                                    Err(error) => {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "File metadata is unavailable: {error}"
-                                            ))
-                                            .color(egui::Color32::YELLOW),
-                                        );
-                                    }
-                                }
-                            } else {
-                                ui.label(egui::RichText::new("No file selected.").weak());
+                            if let Some(path) = dialog.pick_file() {
+                                self.in_file = Some(path);
+                                self.status.clear();
                             }
-                        });
-
-                        if self.mode != OperationMode::Inspect {
-                            ui.add_space(10.0);
-                            egui::Frame::group(ui.style()).show(ui, |ui| {
-                                ui.heading("3. Credential");
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.radio_value(
-                                        &mut self.auth_mode,
-                                        AuthMode::Password,
-                                        "Password",
-                                    );
-                                    ui.radio_value(
-                                        &mut self.auth_mode,
-                                        AuthMode::KeyFile,
-                                        "Experimental hybrid key file",
-                                    );
-                                });
-
-                                if self.auth_mode == AuthMode::Password {
-                                    ui.add_space(6.0);
-                                    ui.label("Password");
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut self.secret)
-                                            .password(!self.show_secrets)
-                                            .desired_width(f32::INFINITY)
-                                            .hint_text("Required"),
-                                    );
-                                    if self.mode == OperationMode::Encrypt {
-                                        ui.label("Confirm password");
-                                        ui.add(
-                                            egui::TextEdit::singleline(
-                                                &mut self.secret_confirmation,
-                                            )
-                                            .password(!self.show_secrets)
-                                            .desired_width(f32::INFINITY)
-                                            .hint_text("Retype the password"),
-                                        );
-                                    }
-                                    ui.label("Seed / optional pepper");
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut self.seed)
-                                            .password(!self.show_secrets)
-                                            .desired_width(f32::INFINITY)
-                                            .hint_text("Leave empty unless you already use one"),
-                                    );
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.checkbox(&mut self.show_secrets, "Show sensitive fields");
-                                        if ui.button("Clear sensitive fields").clicked() {
-                                            self.clear_sensitive_fields();
-                                        }
-                                    });
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Losing the password or optional seed makes the file unrecoverable.",
-                                        )
-                                        .weak(),
-                                    );
-                                } else {
-                                    ui.add_space(6.0);
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Hybrid X25519 + ML-KEM-768 recipients are experimental and unaudited.",
-                                        )
-                                        .color(egui::Color32::YELLOW),
-                                    );
-                                    let label = if self.mode == OperationMode::Encrypt {
-                                        "Choose public key (.lvau-pub)..."
-                                    } else {
-                                        "Choose private key (.lvau-key)..."
-                                    };
-                                    if ui.button(label).clicked() {
-                                        let filter = if self.mode == OperationMode::Encrypt {
-                                            ("Public Key", "lvau-pub")
-                                        } else {
-                                            ("Private Key", "lvau-key")
-                                        };
-                                        if let Some(path) = rfd::FileDialog::new()
-                                            .add_filter(filter.0, &[filter.1])
-                                            .pick_file()
-                                        {
-                                            self.keyfile_path = Some(path);
-                                            self.status.clear();
-                                        }
-                                    }
-                                    if let Some(path) = &self.keyfile_path {
-                                        ui.label(
-                                            egui::RichText::new(path.display().to_string())
-                                                .monospace(),
-                                        );
-                                    } else {
-                                        ui.label(egui::RichText::new("No key file selected.").weak());
-                                    }
-                                    ui.add_space(6.0);
-                                    if ui.button("Generate experimental keypair...").clicked() {
-                                        self.generate_keypair();
-                                    }
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Keep the private .lvau-key file secret and backed up.",
-                                        )
-                                        .weak(),
-                                    );
-                                }
-                            });
                         }
-
-                        if self.mode == OperationMode::Encrypt {
-                            ui.add_space(10.0);
-                            egui::Frame::group(ui.style()).show(ui, |ui| {
-                                ui.heading("4. Encryption options");
-                                ui.label("Security profile");
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.radio_value(
-                                        &mut self.profile,
-                                        SecurityProfile::Fast,
-                                        "Fast",
-                                    );
-                                    ui.radio_value(
-                                        &mut self.profile,
-                                        SecurityProfile::Balanced,
-                                        "Balanced",
-                                    );
-                                    ui.radio_value(
-                                        &mut self.profile,
-                                        SecurityProfile::Archive,
-                                        "Archive",
-                                    );
-                                    ui.radio_value(
-                                        &mut self.profile,
-                                        SecurityProfile::Paranoid,
-                                        "Paranoid (experimental)",
-                                    );
-                                    ui.radio_value(
-                                        &mut self.profile,
-                                        SecurityProfile::Extreme,
-                                        "Extreme (experimental)",
-                                    );
-                                });
-                                ui.label(
-                                    egui::RichText::new(profile_description(&self.profile)).weak(),
-                                );
-                                if matches!(
-                                    self.profile,
-                                    SecurityProfile::Paranoid | SecurityProfile::Extreme
-                                ) {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Cascade/LCO profiles are experimental; more layers are not an audit result.",
-                                        )
-                                        .color(egui::Color32::YELLOW),
-                                    );
-                                }
-                                ui.add_space(6.0);
-                                ui.checkbox(
-                                    &mut self.sfx,
-                                    "Create self-extracting Windows archive (SFX .exe)",
-                                );
-                                if self.sfx {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "SFX is experimental and requires lvau-stub.exe beside the GUI.",
-                                        )
-                                        .color(egui::Color32::YELLOW),
-                                    );
-                                }
-                            });
-                        }
-
-                        if self.mode != OperationMode::Inspect {
-                            ui.add_space(8.0);
-                            ui.checkbox(&mut self.force_overwrite, "Allow overwriting the output file")
-                                .on_hover_text(
-                                    "The GUI still writes through the existing Lvau output path. Enable only after checking the destination.",
-                                );
-                        }
-
-                        ui.add_space(14.0);
-                        let validation_error = self.validation_error();
-                        if ui
-                            .add_enabled(
-                                validation_error.is_none(),
-                                egui::Button::new(
-                                    egui::RichText::new(self.mode.action_label()).strong(),
-                                )
-                                .min_size(egui::vec2(200.0, 38.0)),
-                            )
-                            .clicked()
-                        {
-                            self.begin_selected_operation();
-                        }
-                        if let Some(error) = validation_error {
-                            ui.label(egui::RichText::new(error).weak());
-                        } else if self.mode != OperationMode::Inspect {
-                            ui.label(
-                                egui::RichText::new(
-                                    "You will choose the output path before processing starts.",
-                                )
-                                .weak(),
-                            );
+                        if self.in_file.is_some() && ui.button("Clear").clicked() {
+                            self.in_file = None;
+                            self.status.clear();
                         }
                     });
+                    if let Some(path) = &self.in_file {
+                        ui.label(egui::RichText::new(path.display().to_string()).monospace());
+                        if let Ok(metadata) = fs::metadata(path) {
+                            ui.label(format!("Input size: {}", format_bytes(metadata.len())));
+                        }
+                    }
 
-                    if self.busy {
-                        ui.add_space(14.0);
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.strong("Processing");
-                            });
-                            if self.mode == OperationMode::Inspect {
-                                ui.label("Reading and validating envelope metadata...");
-                            } else if let Some(total) = self.input_size().filter(|size| *size > 0) {
-                                let progress =
-                                    (self.processed_bytes as f32 / total as f32).clamp(0.0, 1.0);
+                    if self.mode != OperationMode::Inspect {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.radio_value(&mut self.auth_mode, AuthMode::Password, "Use Password");
+                            ui.radio_value(&mut self.auth_mode, AuthMode::KeyFile, "Use Experimental Hybrid Key File");
+                        });
+                        if self.auth_mode == AuthMode::Password {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Password:");
                                 ui.add(
-                                    egui::ProgressBar::new(progress)
-                                        .desired_width(f32::INFINITY)
-                                        .text(format!(
-                                            "{} of {}",
-                                            format_bytes(self.processed_bytes),
-                                            format_bytes(total)
-                                        )),
+                                    egui::TextEdit::singleline(&mut self.secret)
+                                        .password(!self.show_secrets),
                                 );
-                            } else {
-                                ui.label(format!(
-                                    "Processed {}",
-                                    format_bytes(self.processed_bytes)
-                                ));
+                            });
+                            if self.mode == OperationMode::Encrypt {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("Confirm password:");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.secret_confirmation)
+                                            .password(!self.show_secrets),
+                                    );
+                                });
                             }
-                            ui.label(
-                                egui::RichText::new(
-                                    "Safe cancellation is not available in this build. Keep the app open until completion.",
-                                )
-                                .weak(),
-                            );
-                        });
-                    }
-
-                    if !self.status.is_empty() {
-                        let color = if self.status.starts_with("Error") {
-                            egui::Color32::RED
-                        } else if self.status.starts_with("Success") {
-                            egui::Color32::GREEN
-                        } else {
-                            egui::Color32::LIGHT_BLUE
-                        };
-                        ui.add_space(12.0);
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.label(egui::RichText::new(&self.status).color(color));
-                        });
-                    }
-
-                    ui.add_space(12.0);
-                    egui::CollapsingHeader::new("Diagnostic logs")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(
-                                        "Logs are kept in memory and limited to 64 KiB.",
-                                    )
-                                    .weak(),
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Seed (optional pepper):");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.seed)
+                                        .password(!self.show_secrets),
                                 );
-                                if ui.button("Clear logs").clicked() {
-                                    if let Ok(mut logs) = self.logs.lock() {
-                                        logs.clear();
-                                    }
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.checkbox(&mut self.show_secrets, "Show sensitive fields");
+                                if ui.button("Clear sensitive fields").clicked() {
+                                    self.clear_sensitive_fields();
                                 }
                             });
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false; 2])
-                                .max_height(180.0)
-                                .stick_to_bottom(true)
-                                .show(ui, |ui| {
-                                    if let Ok(logs) = self.logs.lock() {
-                                        if logs.is_empty() {
-                                            ui.label(egui::RichText::new("No diagnostic entries.").weak());
-                                        } else {
-                                            ui.label(
-                                                egui::RichText::new(logs.as_str()).monospace(),
-                                            );
-                                        }
+                        } else {
+                            ui.label(
+                                egui::RichText::new("Hybrid X25519 + ML-KEM-768 recipients are experimental and unaudited.")
+                                    .color(egui::Color32::YELLOW),
+                            );
+                            ui.horizontal_wrapped(|ui| {
+                                let label = if self.mode == OperationMode::Encrypt {
+                                    "Select Public Key (.lvau-pub)"
+                                } else {
+                                    "Select Private Key (.lvau-key)"
+                                };
+                                if ui.button(label).clicked() {
+                                    let filter = if self.mode == OperationMode::Encrypt {
+                                        ("Public Key", "lvau-pub")
                                     } else {
-                                        ui.label("Log buffer unavailable");
+                                        ("Private Key", "lvau-key")
+                                    };
+                                    if let Some(path) = rfd::FileDialog::new()
+                                        .add_filter(filter.0, &[filter.1])
+                                        .pick_file()
+                                    {
+                                        self.keyfile_path = Some(path);
                                     }
-                                });
+                                }
+                                if let Some(path) = &self.keyfile_path {
+                                    ui.label(path.display().to_string());
+                                }
+                            });
+                        }
+                    }
+
+                    if self.mode == OperationMode::Encrypt {
+                        ui.add_space(8.0);
+                        ui.label("Security profile:");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.radio_value(&mut self.profile, SecurityProfile::Fast, "Fast");
+                            ui.radio_value(&mut self.profile, SecurityProfile::Balanced, "Balanced");
+                            ui.radio_value(&mut self.profile, SecurityProfile::Archive, "Archive");
+                            ui.radio_value(&mut self.profile, SecurityProfile::Paranoid, "Paranoid (experimental)");
+                            ui.radio_value(&mut self.profile, SecurityProfile::Extreme, "Extreme (experimental)");
                         });
+                        if matches!(self.profile, SecurityProfile::Paranoid | SecurityProfile::Extreme) {
+                            ui.label(
+                                egui::RichText::new("Cascade/LCO profiles are experimental; more layers are not an audit result.")
+                                    .color(egui::Color32::YELLOW),
+                            );
+                        }
+                        ui.checkbox(&mut self.sfx, "Create Self-Extracting Archive (SFX .exe)");
+                        if self.sfx {
+                            ui.label(
+                                egui::RichText::new("SFX is experimental and requires lvau-stub.exe beside the GUI.")
+                                    .color(egui::Color32::YELLOW),
+                            );
+                        }
+                    }
+
+                    if self.mode != OperationMode::Inspect {
+                        ui.checkbox(&mut self.force_overwrite, "Force Overwrite");
+                    }
+
+                    let validation_error = self.validation_error();
+                    let action = match self.mode {
+                        OperationMode::Encrypt => "Encrypt & Save",
+                        OperationMode::Decrypt => "Decrypt & Save",
+                        OperationMode::Inspect => "Inspect Envelope",
+                    };
+                    if ui
+                        .add_enabled(validation_error.is_none(), egui::Button::new(action))
+                        .clicked()
+                    {
+                        self.begin_selected_operation();
+                    }
+                    if let Some(error) = validation_error {
+                        ui.label(egui::RichText::new(error).weak());
+                    }
                 });
+
+                if self.busy {
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!("Processed {}", format_bytes(self.processed_bytes)));
+                    });
+                    if self.mode != OperationMode::Inspect {
+                        if let Some(total) = self
+                            .in_file
+                            .as_ref()
+                            .and_then(|path| fs::metadata(path).ok())
+                            .map(|metadata| metadata.len())
+                            .filter(|total| *total > 0)
+                        {
+                            let progress =
+                                (self.processed_bytes as f32 / total as f32).clamp(0.0, 1.0);
+                            ui.add(
+                                egui::ProgressBar::new(progress)
+                                    .text(format!("{} total", format_bytes(total))),
+                            );
+                        }
+                    }
+                    ui.label("The UI remains responsive. Safe cancellation is not available in this build; wait for completion before closing the app.");
+                }
+
+                if !self.status.is_empty() {
+                    let color = if self.status.starts_with("Error") {
+                        egui::Color32::RED
+                    } else if self.status.starts_with("Success") {
+                        egui::Color32::GREEN
+                    } else {
+                        egui::Color32::LIGHT_BLUE
+                    };
+                    ui.add_space(12.0);
+                    ui.label(egui::RichText::new(&self.status).color(color));
+                }
+
+                ui.add_space(16.0);
+                ui.separator();
+                egui::CollapsingHeader::new("Diagnostic Logs")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        if ui.button("Clear").clicked() {
+                            if let Ok(mut logs) = self.logs.lock() {
+                                logs.clear();
+                            }
+                        }
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .max_height(150.0)
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                if let Ok(logs) = self.logs.lock() {
+                                    if logs.is_empty() {
+                                        ui.label(egui::RichText::new("No diagnostic entries.").weak());
+                                    } else {
+                                        ui.label(egui::RichText::new(logs.as_str()).monospace());
+                                    }
+                                } else {
+                                    ui.label("Log buffer unavailable");
+                                }
+                            });
+                    });
             });
         });
     }
-}
-
-fn configure_style(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 7.0);
-    ctx.set_style(style);
 }
 
 fn main() {
@@ -1017,18 +798,15 @@ fn main() {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([820.0, 820.0])
-            .with_min_inner_size([520.0, 620.0]),
+            .with_inner_size([760.0, 760.0])
+            .with_min_inner_size([480.0, 560.0]),
         ..Default::default()
     };
 
     if let Err(error) = eframe::run_native(
         "Lvau Cryptography",
         options,
-        Box::new(|cc| {
-            configure_style(&cc.egui_ctx);
-            Ok(Box::new(LvauGuiApp::new(logs)))
-        }),
+        Box::new(|_cc| Ok(Box::new(LvauGuiApp::new(logs)))),
     ) {
         eprintln!("Lvau GUI failed: {error}");
     }
@@ -1043,7 +821,7 @@ mod tests {
     fn encryption_requires_matching_password_confirmation() {
         assert_eq!(
             validate_password_fields(OperationMode::Encrypt, "secret", "different"),
-            Err("Password confirmation does not match.")
+            Err("Password confirmation does not match")
         );
         assert_eq!(
             validate_password_fields(OperationMode::Encrypt, "secret", "secret"),
@@ -1056,14 +834,10 @@ mod tests {
     }
 
     #[test]
-    fn suggested_output_names_preserve_the_input_name() {
+    fn suggested_output_names_are_conservative() {
         assert_eq!(
             suggested_output_name(Path::new("report.txt"), OperationMode::Encrypt, false),
             "report.txt.lvau"
-        );
-        assert_eq!(
-            suggested_output_name(Path::new("report.txt"), OperationMode::Encrypt, true),
-            "report.txt.exe"
         );
         assert_eq!(
             suggested_output_name(Path::new("report.txt.lvau"), OperationMode::Decrypt, false),
