@@ -26,8 +26,7 @@ The following commands currently emit schema version 1:
 | `preflight --json` | `preflight` |
 | `report --json` | `report` |
 | `policy lint --json` | `policy-lint` |
-
-`bundle diff --json` also emits the shared envelope, but Lvau 0.5.0 currently reports its `command` value as `report`. This is a known compatibility defect. Consumers of 0.5.0 should identify that operation from the command they invoked and the diff fields inside `data`, rather than relying on the `command` field alone.
+| `bundle diff --json` | `bundle-diff` |
 
 `bundle inspect --json` and `bundle list --json` currently emit command-specific JSON objects without the shared top-level envelope. Their shape must not be treated as schema version 1 until they are migrated explicitly.
 
