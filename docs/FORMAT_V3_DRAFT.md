@@ -8,6 +8,8 @@ does not enable v3 capsule creation.
 
 Implemented in `lvau-core`:
 
+- a dedicated, non-exhaustive `V3SuiteId` registry that leaves the existing
+  public format-v2 `SuiteId` enum unchanged for downstream source compatibility;
 - explicit suite identities for `LV3-XC20P` and
   `LV3-AESGCMSIV-XC20P`;
 - suite- and purpose-separated HKDF-SHA256 subkeys;
@@ -19,7 +21,7 @@ Implemented in `lvau-core`:
   callers construct a descriptor without using its checked constructor;
 - fixed key, nonce, and AAD vectors;
 - negative tests for tampering, chunk-index changes, final-marker changes,
-  length mismatches, oversized chunks, and legacy-suite confusion.
+  length mismatches, oversized chunks, and suite-domain confusion.
 
 Not implemented yet:
 
@@ -31,8 +33,9 @@ Not implemented yet:
 - v3 recipient slots, signatures, migration fixtures, fuzz targets, and
   benchmarks.
 
-Format v2 remains the only writer format and its identifiers, key labels, nonce
-rules, AAD, and ciphertext layout are unchanged.
+Format v2 remains the only writer format. Its public suite identifier enum,
+algorithm identifiers, key labels, nonce rules, AAD, and ciphertext layout are
+unchanged.
 
 ## Suite identities
 
@@ -109,7 +112,7 @@ Before a v3 writer is exposed:
 6. add malformed-input, per-field tamper, cross-suite confusion, and fuzz tests;
 7. document CPU, memory, and ciphertext-expansion costs;
 8. add explicit experimental CLI flags while leaving v2 as the default writer;
-9. preserve all supported v1/v2 reads and fixtures.
+9. preserve all supported v1/v2 reads, public identifiers, and fixtures.
 
 No suite should be described as stable, audited, or production-ready merely
 because its chunk primitive exists.
