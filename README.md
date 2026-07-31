@@ -1,13 +1,19 @@
-# Lvau
+<p align="center">
+  <img src="./assets/lvau-icon.svg" alt="Lvau" width="128" height="128">
+</p>
 
-> Inspectable encrypted capsules for local files and developer workflows.
+<h1 align="center">Lvau</h1>
+
+<p align="center"><strong>Inspectable encrypted capsules for local files and developer workflows.</strong></p>
+
+<p align="center">English · <a href="README_ja.md">日本語</a></p>
+
+<p align="center">
+  <a href="https://github.com/lasder-ca/lvau/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/lasder-ca/lvau/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+</p>
 
 Lvau is an experimental Rust workspace for local file encryption. It includes a CLI, reusable cryptographic library, versioned `.lvau` format, native GUI, and self-extracting archive prototype. The current release is **0.5.0**.
-
-English · [日本語](README_ja.md)
-
-[![CI](https://github.com/lasder-ca/lvau/actions/workflows/ci.yml/badge.svg)](https://github.com/lasder-ca/lvau/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > [!WARNING]
 > Lvau has not completed an independent security audit, and formats may change before 1.0. Read [SECURITY.md](SECURITY.md) and [the threat model](docs/THREAT_MODEL.md) before using it for important data.
@@ -54,6 +60,13 @@ Policy linting is experimental and advisory. It is not automatically enforced by
 Automation-facing JSON uses a versioned top-level envelope where implemented. See [the JSON output contract](docs/JSON_OUTPUT.md) for the exact command coverage and compatibility rules.
 
 [Nelo](https://github.com/lasder-ca/Nelo) can own an `lvau-cli` process for the lifetime of an HTTP request. Its example terminates encryption on request cancellation, bounds uploads, and removes request-owned temporary plaintext. See [the Nelo integration guide](docs/integrations/NELO.md).
+
+## Brand assets
+
+- [`assets/lvau-icon.svg`](./assets/lvau-icon.svg) — primary icon for README, product, and website surfaces.
+- [`assets/favicon.svg`](./assets/favicon.svg) — compact browser and site icon.
+
+Both files are flat SVGs with transparent backgrounds and use only the project navy and muted teal palette.
 
 ## Build from source
 
