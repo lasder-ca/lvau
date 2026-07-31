@@ -130,9 +130,8 @@ mod tests {
         assert!(single.experimental);
         assert!(!single.includes_legacy_obfuscation);
 
-        let layered =
-            CryptoSuite::for_v3_suite(SuiteId::V3Aes256GcmSivXChaCha20Poly1305)
-                .expect("registered v3 layered suite");
+        let layered = CryptoSuite::for_v3_suite(SuiteId::V3Aes256GcmSivXChaCha20Poly1305)
+            .expect("registered v3 layered suite");
         assert_eq!(layered.layer_count, 2);
         assert_eq!(layered.tag_overhead_per_chunk, 32);
         assert_eq!(layered.aes_nonce_len, Some(12));
