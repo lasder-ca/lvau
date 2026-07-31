@@ -16,7 +16,7 @@ use zeroize::Zeroizing;
 
 use crate::crypto::CryptoError;
 
-use super::SuiteId;
+use super::V3SuiteId;
 
 const KEY_SCHEDULE_DOMAIN: &[u8] = b"Lvau v3 key schedule\0";
 const SUBKEY_INFO_DOMAIN: &[u8] = b"Lvau v3 subkey\0";
@@ -85,29 +85,27 @@ impl V3ChunkDescriptor {
 }
 
 /// Return the fixed wire name for an experimental v3 payload suite.
-pub const fn suite_wire_name(suite: SuiteId) -> Result<&'static str, CryptoError> {
+pub const fn suite_wire_name(suite: V3SuiteId) -> &'static str {
     match suite {
-        SuiteId::V3XChaCha20Poly1305 => Ok("LV3-XC20P"),
-        SuiteId::V3Aes256GcmSivXChaCha20Poly1305 => Ok("LV3-AESGCMSIV-XC20P"),
-        _ => Err(CryptoError::Validation("not a format-v3 payload suite")),
+        V3SuiteId::XChaCha20Poly1305 => "LV3-XC20P",
+        V3SuiteId::Aes256GcmSivXChaCha20Poly1305 => "LV3-AESGCMSIV-XC20P",
     }
 }
 
-const fn suite_code(suite: SuiteId) -> Result<u8, CryptoError> {
+const fn suite_code(suite: V3SuiteId) -> u8 {
     match suite {
-        SuiteId::V3XChaCha20Poly1305 => Ok(1),
-        SuiteId::V3Aes256GcmSivXChaCha20Poly1305 => Ok(2),
-        _ => Err(CryptoError::Validation("not a format-v3 payload suite")),
+        V3SuiteId::XChaCha20Poly1305 => 1,
+        V3SuiteId::Aes256GcmSivXChaCha20Poly1305 => 2,
     }
 }
 
 /// Derive one independent 256-bit key from the random file root key.
 pub fn derive_subkey(
     root_key: &[u8; 32],
-    suite: SuiteId,
+    suite: V3SuiteId,
     purpose: V3KeyPurpose,
 ) -> Result<Zeroizing<[u8; 32]>, CryptoError> {
-    let suite_name = suite_wire_name(suite)?.as_bytes();
+    let suite_name = suite_wire_name(suite).as_bytes();
     let hk = Hkdf::<Sha256>::new(Some(KEY_SCHEDULE_DOMAIN), root_key);
 
     let mut info =
@@ -125,13 +123,13 @@ pub fn derive_subkey(
 
 fn derive_nonce<const N: usize>(
     base_nonce: &[u8],
-    suite: SuiteId,
+    suite: V3SuiteId,
     layer: V3Layer,
     chunk_index: u64,
 ) -> Result<[u8; N], CryptoError> {
     let hk = Hkdf::<Sha256>::new(Some(NONCE_SCHEDULE_DOMAIN), base_nonce);
     let mut info = [0u8; 10];
-    info[0] = suite_code(suite)?;
+    info[0] = suite_code(suite);
     info[1] = layer as u8;
     info[2..].copy_from_slice(&chunk_index.to_le_bytes());
 
@@ -144,7 +142,7 @@ fn derive_nonce<const N: usize>(
 /// Derive the XChaCha20-Poly1305 nonce for one v3 chunk and layer.
 pub fn derive_xchacha_nonce(
     base_nonce: &[u8; 24],
-    suite: SuiteId,
+    suite: V3SuiteId,
     layer: V3Layer,
     chunk_index: u64,
 ) -> Result<[u8; 24], CryptoError> {
@@ -160,7 +158,7 @@ pub fn derive_aes_gcm_siv_nonce(
 ) -> Result<[u8; 12], CryptoError> {
     derive_nonce(
         base_nonce,
-        SuiteId::V3Aes256GcmSivXChaCha20Poly1305,
+        V3SuiteId::Aes256GcmSivXChaCha20Poly1305,
         V3Layer::Inner,
         chunk_index,
     )
@@ -172,16 +170,16 @@ pub fn derive_aes_gcm_siv_nonce(
 /// `domain || suite || layer || commitment || index || plaintext_len ||
 /// inner_len || ciphertext_len || final`.
 pub fn chunk_aad(
-    suite: SuiteId,
+    suite: V3SuiteId,
     layer: V3Layer,
     envelope_commitment: &[u8; 32],
     descriptor: V3ChunkDescriptor,
     inner_len: u32,
     ciphertext_len: u32,
-) -> Result<Vec<u8>, CryptoError> {
+) -> Vec<u8> {
     let mut aad = Vec::with_capacity(CHUNK_AAD_DOMAIN.len() + 55);
     aad.extend_from_slice(CHUNK_AAD_DOMAIN);
-    aad.push(suite_code(suite)?);
+    aad.push(suite_code(suite));
     aad.push(layer as u8);
     aad.extend_from_slice(envelope_commitment);
     aad.extend_from_slice(&descriptor.index.to_le_bytes());
@@ -189,7 +187,7 @@ pub fn chunk_aad(
     aad.extend_from_slice(&inner_len.to_le_bytes());
     aad.extend_from_slice(&ciphertext_len.to_le_bytes());
     aad.push(u8::from(descriptor.final_chunk));
-    Ok(aad)
+    aad
 }
 
 fn validate_plaintext_len(plaintext_len: u32) -> Result<usize, CryptoError> {
@@ -229,7 +227,7 @@ pub fn encrypt_xchacha_chunk(
         ));
     }
 
-    let suite = SuiteId::V3XChaCha20Poly1305;
+    let suite = V3SuiteId::XChaCha20Poly1305;
     let ciphertext_len = checked_single_layer_ciphertext_len(descriptor.plaintext_len)?;
     let aad = chunk_aad(
         suite,
@@ -238,7 +236,7 @@ pub fn encrypt_xchacha_chunk(
         descriptor,
         0,
         ciphertext_len,
-    )?;
+    );
     let key = derive_subkey(root_key, suite, V3KeyPurpose::PayloadSingle)?;
     let nonce = derive_xchacha_nonce(base_nonce, suite, V3Layer::Single, descriptor.index)?;
 
@@ -270,7 +268,7 @@ pub fn decrypt_xchacha_chunk(
         return Err(CryptoError::DecryptionFailed);
     }
 
-    let suite = SuiteId::V3XChaCha20Poly1305;
+    let suite = V3SuiteId::XChaCha20Poly1305;
     let aad = chunk_aad(
         suite,
         V3Layer::Single,
@@ -278,7 +276,7 @@ pub fn decrypt_xchacha_chunk(
         descriptor,
         0,
         expected_len,
-    )?;
+    );
     let key = derive_subkey(root_key, suite, V3KeyPurpose::PayloadSingle)?;
     let nonce = derive_xchacha_nonce(base_nonce, suite, V3Layer::Single, descriptor.index)?;
 
@@ -317,10 +315,19 @@ mod tests {
     }
 
     #[test]
+    fn suite_wire_names_are_stable() {
+        assert_eq!(suite_wire_name(V3SuiteId::XChaCha20Poly1305), "LV3-XC20P");
+        assert_eq!(
+            suite_wire_name(V3SuiteId::Aes256GcmSivXChaCha20Poly1305),
+            "LV3-AESGCMSIV-XC20P"
+        );
+    }
+
+    #[test]
     fn key_schedule_vector_is_stable() {
         let key = derive_subkey(
             &[0x42; 32],
-            SuiteId::V3XChaCha20Poly1305,
+            V3SuiteId::XChaCha20Poly1305,
             V3KeyPurpose::PayloadSingle,
         )
         .expect("derive v3 key");
@@ -336,7 +343,7 @@ mod tests {
         let index = 0x0102_0304_0506_0708;
         let nonce = derive_xchacha_nonce(
             &[0xA5; 24],
-            SuiteId::V3XChaCha20Poly1305,
+            V3SuiteId::XChaCha20Poly1305,
             V3Layer::Single,
             index,
         )
@@ -347,7 +354,7 @@ mod tests {
         );
 
         let aad = chunk_aad(
-            SuiteId::V3XChaCha20Poly1305,
+            V3SuiteId::XChaCha20Poly1305,
             V3Layer::Single,
             &[0x11; 32],
             V3ChunkDescriptor {
@@ -357,8 +364,7 @@ mod tests {
             },
             0,
             1250,
-        )
-        .expect("construct v3 AAD");
+        );
         assert_eq!(
             aad,
             decode_hex(
@@ -445,14 +451,5 @@ mod tests {
                 "v3 chunk plaintext exceeds the format limit"
             ))
         ));
-    }
-
-    #[test]
-    fn legacy_suite_ids_fail_closed() {
-        assert!(suite_wire_name(SuiteId::V2XChaCha20Poly1305).is_err());
-        assert!(
-            derive_xchacha_nonce(&[0; 24], SuiteId::V2XChaCha20Poly1305, V3Layer::Single, 0,)
-                .is_err()
-        );
     }
 }
