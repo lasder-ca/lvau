@@ -1682,7 +1682,7 @@ fn run() -> Result<(), CliError> {
                 let report = lvau_core::diff::diff_bundles(&old_file, old_pwd, &new_file, new_pwd)?;
 
                 if json {
-                    output::print_success("report", &report)?;
+                    output::print_success("bundle-diff", &report)?;
                 } else {
                     println!("Diff Report:");
                     println!("Old: {}", old_file.display());
@@ -1996,7 +1996,7 @@ fn run() -> Result<(), CliError> {
                     &out_file,
                     pwd,
                     None,
-                    SecurityProfile::Fast,
+                    SecurityProfile::Balanced,
                     None,
                     pol.as_ref(),
                     false,
@@ -2063,7 +2063,7 @@ fn run() -> Result<(), CliError> {
                     &in_file,
                     pwd,
                     None,
-                    SecurityProfile::Fast,
+                    SecurityProfile::Balanced,
                     None,
                     pol.as_ref(),
                     false,
