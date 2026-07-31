@@ -93,7 +93,9 @@ struct LvauGuiApp {
     auth_mode: AuthMode,
     in_file: Option<PathBuf>,
     secret: String,
+    secret_confirmation: String,
     seed: String,
+    show_secrets: bool,
     keyfile_path: Option<PathBuf>,
     status: String,
     profile: SecurityProfile,
@@ -112,7 +114,9 @@ impl LvauGuiApp {
             auth_mode: AuthMode::Password,
             in_file: None,
             secret: String::new(),
+            secret_confirmation: String::new(),
             seed: String::new(),
+            show_secrets: false,
             keyfile_path: None,
             status: String::new(),
             profile: SecurityProfile::Balanced,
@@ -168,6 +172,30 @@ impl LvauGuiApp {
         }
     }
 
+    fn clear_sensitive_fields(&mut self) {
+        self.secret.zeroize();
+        self.secret_confirmation.zeroize();
+        self.seed.zeroize();
+    }
+
+    fn validation_error(&self) -> Option<&'static str> {
+        if self.in_file.is_none() {
+            return Some("Select an input file");
+        }
+        if self.mode == OperationMode::Inspect {
+            return None;
+        }
+        match self.auth_mode {
+            AuthMode::Password => {
+                validate_password_fields(self.mode, &self.secret, &self.secret_confirmation).err()
+            }
+            AuthMode::KeyFile if self.keyfile_path.is_none() => {
+                Some("Select the required key file")
+            }
+            AuthMode::KeyFile => None,
+        }
+    }
+
     fn selected_credential(&self) -> Option<Credential> {
         match self.auth_mode {
             AuthMode::Password if !self.secret.is_empty() => Some(Credential::Password {
@@ -180,6 +208,11 @@ impl LvauGuiApp {
     }
 
     fn begin_selected_operation(&mut self) {
+        if let Some(error) = self.validation_error() {
+            self.status = format!("Error: {error}");
+            return;
+        }
+
         let Some(in_file) = self.in_file.clone() else {
             self.status = "Error: Select an input file".into();
             return;
@@ -190,7 +223,11 @@ impl LvauGuiApp {
             return;
         }
 
-        let mut dialog = rfd::FileDialog::new();
+        let mut dialog = rfd::FileDialog::new()
+            .set_file_name(suggested_output_name(&in_file, self.mode, self.sfx));
+        if let Some(parent) = in_file.parent() {
+            dialog = dialog.set_directory(parent);
+        }
         if self.mode == OperationMode::Encrypt {
             dialog = if self.sfx {
                 dialog.add_filter("Executable", &["exe"])
@@ -201,6 +238,10 @@ impl LvauGuiApp {
         let Some(out_file) = dialog.save_file() else {
             return;
         };
+        if out_file == in_file {
+            self.status = "Error: Input and output paths must be different.".into();
+            return;
+        }
         if out_file.exists() && !self.force_overwrite {
             self.status =
                 "Error: Output exists. Enable Force Overwrite or choose another path.".into();
@@ -220,9 +261,46 @@ impl LvauGuiApp {
             sfx: self.sfx,
             force: self.force_overwrite,
         };
-        self.secret.zeroize();
-        self.seed.zeroize();
+        self.clear_sensitive_fields();
         self.start_task(task);
+    }
+}
+
+fn validate_password_fields(
+    mode: OperationMode,
+    password: &str,
+    confirmation: &str,
+) -> Result<(), &'static str> {
+    if password.is_empty() {
+        return Err("Enter a password");
+    }
+    if mode == OperationMode::Encrypt {
+        if confirmation.is_empty() {
+            return Err("Confirm the password");
+        }
+        if password != confirmation {
+            return Err("Password confirmation does not match");
+        }
+    }
+    Ok(())
+}
+
+fn suggested_output_name(input: &Path, mode: OperationMode, sfx: bool) -> String {
+    let file_name = input
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "output".into());
+
+    match mode {
+        OperationMode::Encrypt if sfx => format!("{file_name}.exe"),
+        OperationMode::Encrypt => format!("{file_name}.lvau"),
+        OperationMode::Decrypt => file_name
+            .strip_suffix(".lvau")
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("{file_name}.decrypted")),
+        OperationMode::Inspect => file_name.into_owned(),
     }
 }
 
@@ -254,6 +332,9 @@ fn run_crypto(
     force: bool,
     sender: &mpsc::Sender<GuiMessage>,
 ) -> Result<String, String> {
+    if in_file == out_file {
+        return Err("Input and output paths must be different".into());
+    }
     if out_file.exists() && !force {
         return Err(format!("Output already exists: {}", out_file.display()));
     }
@@ -489,11 +570,20 @@ impl eframe::App for LvauGuiApp {
                     }
 
                     ui.add_space(14.0);
+                    let previous_mode = self.mode;
                     ui.horizontal_wrapped(|ui| {
                         ui.radio_value(&mut self.mode, OperationMode::Encrypt, "Encrypt");
                         ui.radio_value(&mut self.mode, OperationMode::Decrypt, "Decrypt");
                         ui.radio_value(&mut self.mode, OperationMode::Inspect, "Inspect");
                     });
+                    if self.mode != previous_mode {
+                        self.keyfile_path = None;
+                        self.secret_confirmation.zeroize();
+                        self.status.clear();
+                        if self.mode != OperationMode::Encrypt {
+                            self.sfx = false;
+                        }
+                    }
 
                     ui.horizontal_wrapped(|ui| {
                         if ui.button("Select Target File").clicked() {
@@ -506,10 +596,17 @@ impl eframe::App for LvauGuiApp {
                                 self.status.clear();
                             }
                         }
-                        if let Some(path) = &self.in_file {
-                            ui.label(path.display().to_string());
+                        if self.in_file.is_some() && ui.button("Clear").clicked() {
+                            self.in_file = None;
+                            self.status.clear();
                         }
                     });
+                    if let Some(path) = &self.in_file {
+                        ui.label(egui::RichText::new(path.display().to_string()).monospace());
+                        if let Ok(metadata) = fs::metadata(path) {
+                            ui.label(format!("Input size: {}", format_bytes(metadata.len())));
+                        }
+                    }
 
                     if self.mode != OperationMode::Inspect {
                         ui.horizontal_wrapped(|ui| {
@@ -519,11 +616,32 @@ impl eframe::App for LvauGuiApp {
                         if self.auth_mode == AuthMode::Password {
                             ui.horizontal_wrapped(|ui| {
                                 ui.label("Password:");
-                                ui.add(egui::TextEdit::singleline(&mut self.secret).password(true));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.secret)
+                                        .password(!self.show_secrets),
+                                );
                             });
+                            if self.mode == OperationMode::Encrypt {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("Confirm password:");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.secret_confirmation)
+                                            .password(!self.show_secrets),
+                                    );
+                                });
+                            }
                             ui.horizontal_wrapped(|ui| {
                                 ui.label("Seed (optional pepper):");
-                                ui.add(egui::TextEdit::singleline(&mut self.seed).password(true));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.seed)
+                                        .password(!self.show_secrets),
+                                );
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.checkbox(&mut self.show_secrets, "Show sensitive fields");
+                                if ui.button("Clear sensitive fields").clicked() {
+                                    self.clear_sensitive_fields();
+                                }
                             });
                         } else {
                             ui.label(
@@ -585,17 +703,20 @@ impl eframe::App for LvauGuiApp {
                         ui.checkbox(&mut self.force_overwrite, "Force Overwrite");
                     }
 
-                    let can_proceed = self.in_file.is_some()
-                        && (self.mode == OperationMode::Inspect
-                            || (self.auth_mode == AuthMode::Password && !self.secret.is_empty())
-                            || (self.auth_mode == AuthMode::KeyFile && self.keyfile_path.is_some()));
+                    let validation_error = self.validation_error();
                     let action = match self.mode {
                         OperationMode::Encrypt => "Encrypt & Save",
                         OperationMode::Decrypt => "Decrypt & Save",
                         OperationMode::Inspect => "Inspect Envelope",
                     };
-                    if ui.add_enabled(can_proceed, egui::Button::new(action)).clicked() {
+                    if ui
+                        .add_enabled(validation_error.is_none(), egui::Button::new(action))
+                        .clicked()
+                    {
                         self.begin_selected_operation();
+                    }
+                    if let Some(error) = validation_error {
+                        ui.label(egui::RichText::new(error).weak());
                     }
                 });
 
@@ -605,6 +726,22 @@ impl eframe::App for LvauGuiApp {
                         ui.spinner();
                         ui.label(format!("Processed {}", format_bytes(self.processed_bytes)));
                     });
+                    if self.mode == OperationMode::Encrypt {
+                        if let Some(total) = self
+                            .in_file
+                            .as_ref()
+                            .and_then(|path| fs::metadata(path).ok())
+                            .map(|metadata| metadata.len())
+                            .filter(|total| *total > 0)
+                        {
+                            let progress =
+                                (self.processed_bytes as f32 / total as f32).clamp(0.0, 1.0);
+                            ui.add(
+                                egui::ProgressBar::new(progress)
+                                    .text(format!("{} total", format_bytes(total))),
+                            );
+                        }
+                    }
                     ui.label("The UI remains responsive. Safe cancellation is not available in this build; wait for completion before closing the app.");
                 }
 
@@ -622,24 +759,29 @@ impl eframe::App for LvauGuiApp {
 
                 ui.add_space(16.0);
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.heading("Diagnostic Logs");
-                    if ui.button("Clear").clicked() {
-                        if let Ok(mut logs) = self.logs.lock() {
-                            logs.clear();
-                        }
-                    }
-                });
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .max_height(150.0)
-                    .stick_to_bottom(true)
+                egui::CollapsingHeader::new("Diagnostic Logs")
+                    .default_open(false)
                     .show(ui, |ui| {
-                        if let Ok(logs) = self.logs.lock() {
-                            ui.label(logs.as_str());
-                        } else {
-                            ui.label("Log buffer unavailable");
+                        if ui.button("Clear").clicked() {
+                            if let Ok(mut logs) = self.logs.lock() {
+                                logs.clear();
+                            }
                         }
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .max_height(150.0)
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                if let Ok(logs) = self.logs.lock() {
+                                    if logs.is_empty() {
+                                        ui.label(egui::RichText::new("No diagnostic entries.").weak());
+                                    } else {
+                                        ui.label(egui::RichText::new(logs.as_str()).monospace());
+                                    }
+                                } else {
+                                    ui.label("Log buffer unavailable");
+                                }
+                            });
                     });
             });
         });
@@ -673,6 +815,38 @@ fn main() {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn encryption_requires_matching_password_confirmation() {
+        assert_eq!(
+            validate_password_fields(OperationMode::Encrypt, "secret", "different"),
+            Err("Password confirmation does not match")
+        );
+        assert_eq!(
+            validate_password_fields(OperationMode::Encrypt, "secret", "secret"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_password_fields(OperationMode::Decrypt, "secret", ""),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn suggested_output_names_are_conservative() {
+        assert_eq!(
+            suggested_output_name(Path::new("report.txt"), OperationMode::Encrypt, false),
+            "report.txt.lvau"
+        );
+        assert_eq!(
+            suggested_output_name(Path::new("report.txt.lvau"), OperationMode::Decrypt, false),
+            "report.txt"
+        );
+        assert_eq!(
+            suggested_output_name(Path::new("report.bin"), OperationMode::Decrypt, false),
+            "report.bin.decrypted"
+        );
+    }
 
     #[test]
     fn sfx_builder_streams_payload_and_writes_footer() {
