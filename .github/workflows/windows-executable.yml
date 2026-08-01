@@ -1,0 +1,50 @@
+name: Windows executable
+
+on:
+  push:
+    branches:
+      - build/windows-exe-20260801
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-executable-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Test workspace
+        run: cargo test --locked --workspace --all-features
+      - name: Build Windows GUI and SFX stub
+        run: cargo build --locked --release --package lvau-gui --package lvau-stub
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/release/lvau-gui.exe dist/Lvau.exe
+          Copy-Item target/release/lvau-stub.exe dist/lvau-stub.exe
+          @"
+          Lvau Windows x86_64 build
+          Commit: $env:GITHUB_SHA
+
+          Keep Lvau.exe and lvau-stub.exe in the same directory.
+          This build is unsigned experimental software.
+          "@ | Set-Content -LiteralPath dist/BUILD.txt -Encoding utf8
+      - name: Upload Windows executables
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lvau-windows-x86_64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
