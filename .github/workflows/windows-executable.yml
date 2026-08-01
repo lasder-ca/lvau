@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - build/windows-exe-20260801
+  pull_request:
 
 permissions:
   contents: read
