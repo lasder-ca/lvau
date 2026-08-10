@@ -16,6 +16,7 @@ env:
 
 jobs:
   finalize:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -97,7 +98,9 @@ jobs:
           set -euo pipefail
           rm -f audit/final-hardening.py audit/contributory-helper.py
           rmdir audit 2>/dev/null || true
-          rm -f .github/workflows/finalize-security-rewrite.yml
+          # Workflow files are committed separately through the authenticated connector.
+          # Keeping them out of the Actions bot commit avoids GitHub's workflow permission gate.
+          git restore --source=HEAD -- .github/workflows/release.yml .github/workflows/finalize-security-rewrite.yml
           git add -A
           git diff --cached --check
           if git diff --cached --quiet; then
