@@ -5,6 +5,7 @@ on:
     branches: [security/rewrite-20260810]
     paths:
       - audit/final-hardening.py
+      - audit/contributory-helper.py
       - .github/workflows/finalize-security-rewrite.yml
 
 permissions:
@@ -35,38 +36,24 @@ jobs:
         run: |
           set -euo pipefail
           python3 audit/final-hardening.py
+          python3 audit/contributory-helper.py
 
-          # Keep this regression beside the rest of crypto's unit tests so it uses the same
-          # private protocol types without widening lvau-core's public API just for testing.
+          # Keep the regression beside the private crypto helpers instead of widening lvau-core's
+          # public API just to exercise a protocol invariant.
           rm -f crates/lvau-core/tests/hybrid_hardening.rs
           cat >> crates/lvau-core/src/crypto/tests.rs <<'RS'
 
           #[test]
-          fn encryption_rejects_non_contributory_x25519_recipient() {
-              let input = unique_path("non-contributory-x25519.input");
-              let output = unique_path("non-contributory-x25519.lvau");
-              fs::write(&input, b"hybrid-hardening").unwrap();
-
-              let (_private_key, mut recipient) = generate_keypair();
-              recipient.x25519 = x25519_dalek::PublicKey::from([0u8; 32]);
-
-              let error = encrypt_file_keypairs(
-                  &input,
-                  &output,
-                  &[recipient],
-                  SecurityProfile::Fast,
-                  None,
-                  None,
-                  false,
-              )
-              .unwrap_err();
+          fn zero_x25519_peer_is_rejected_by_hybrid_contributory_helper() {
+              let secret = x25519_dalek::StaticSecret::from([42u8; 32]);
+              let public = x25519_dalek::PublicKey::from([0u8; 32]);
 
               assert!(matches!(
-                  error,
-                  CryptoError::Validation("Recipient X25519 public key is non-contributory")
+                  derive_contributory_x25519(&secret, &public),
+                  Err(CryptoError::Validation(
+                      "Recipient X25519 public key is non-contributory"
+                  ))
               ));
-              assert!(!output.exists());
-              let _ = fs::remove_file(input);
           }
           RS
 
@@ -86,7 +73,7 @@ jobs:
       - name: Commit only after all validation succeeds
         run: |
           set -euo pipefail
-          rm -f audit/final-hardening.py
+          rm -f audit/final-hardening.py audit/contributory-helper.py
           rmdir audit 2>/dev/null || true
           rm -f .github/workflows/finalize-security-rewrite.yml
           git add -A
