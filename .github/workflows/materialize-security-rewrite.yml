@@ -35,8 +35,10 @@ jobs:
         run: |
           set -euo pipefail
           cat audit/hardening.* | base64 --decode | xz --decompress > /tmp/lvau-hardening.patch
-          git apply --check /tmp/lvau-hardening.patch
-          git apply /tmp/lvau-hardening.patch
+          # The SFX stub is rewritten separately against its exact current source. Excluding it
+          # avoids accepting a stale synthetic-context hunk while retaining all other audited fixes.
+          git apply --check --exclude=crates/lvau-stub/src/main.rs /tmp/lvau-hardening.patch
+          git apply --exclude=crates/lvau-stub/src/main.rs /tmp/lvau-hardening.patch
           cargo fmt --all
           git diff --check
 
