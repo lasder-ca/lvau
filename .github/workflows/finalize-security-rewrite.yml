@@ -40,6 +40,22 @@ jobs:
       - name: Consolidate and harden bundle extraction
         run: python3 audit/final-hardening.py bundle
 
+      - name: Complete bundle hardening imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/lvau-core/src/bundle_stream.rs")
+          text = path.read_text(encoding="utf-8")
+          old = "use std::path::{Path, PathBuf};"
+          new = "use std::path::{Component, Path, PathBuf};"
+          if text.count(old) != 1:
+              raise SystemExit("bundle_stream.rs: expected exactly one path import anchor")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Harden disclosure links and release provenance
         run: python3 audit/final-hardening.py docs-release
 
