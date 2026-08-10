@@ -18,6 +18,17 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Require the release tag to point at current master
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          master_sha="$(git rev-parse origin/master)"
+          test "${GITHUB_SHA}" = "${master_sha}" || {
+            echo "release tag must point at current master (${master_sha}), got ${GITHUB_SHA}" >&2
+            exit 1
+          }
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           components: clippy,rustfmt
@@ -192,7 +203,7 @@ jobs:
           find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 | sort -z | xargs -0 sha256sum > checksums.txt
           test -s checksums.txt
       - name: Attest release artifacts
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: |
             artifacts/*.tar.gz
