@@ -31,15 +31,24 @@ jobs:
       - name: Install Linux GUI dependencies
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libgl1-mesa-dev
 
-      - name: Apply fail-closed final hardening
+      - name: Apply repository and bundle hardening
         shell: bash
         run: |
           set -euo pipefail
           python3 audit/final-hardening.py
-          python3 audit/contributory-helper.py
+          echo "final-hardening transformation applied"
 
-          # Keep the regression beside the private crypto helpers instead of widening lvau-core's
-          # public API just to exercise a protocol invariant.
+      - name: Centralize contributory X25519 derivation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 audit/contributory-helper.py
+          echo "contributory-X25519 transformation applied"
+
+      - name: Add private crypto regression
+        shell: bash
+        run: |
+          set -euo pipefail
           rm -f crates/lvau-core/tests/hybrid_hardening.rs
           cat >> crates/lvau-core/src/crypto/tests.rs <<'RS'
 
@@ -56,7 +65,6 @@ jobs:
               ));
           }
           RS
-
           cargo fmt --all
           git diff --check
 
