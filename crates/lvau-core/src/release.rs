@@ -10,8 +10,18 @@ pub enum ReleaseError {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Serialization(#[from] postcard::Error),
-    #[error("Failed to parse or missing envelope")]
+    #[error("Failed to parse, missing, or oversized envelope")]
     EnvelopeError,
+}
+
+fn encode_envelope_checked(
+    envelope: &lvau_protocol::envelope::Envelope,
+) -> Result<Vec<u8>, ReleaseError> {
+    let bytes = postcard::to_allocvec(envelope)?;
+    if bytes.is_empty() || bytes.len() > crate::crypto::MAX_ENVELOPE_SIZE {
+        return Err(ReleaseError::EnvelopeError);
+    }
+    Ok(bytes)
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ReleaseError> {
@@ -75,8 +85,8 @@ pub fn attach_release_metadata(
 
     envelope.release_metadata = Some(metadata);
 
-    let new_env_bytes = postcard::to_allocvec(&envelope).map_err(ReleaseError::Serialization)?;
-    let new_len = new_env_bytes.len() as u32;
+    let new_env_bytes = encode_envelope_checked(&envelope)?;
+    let new_len = u32::try_from(new_env_bytes.len()).map_err(|_| ReleaseError::EnvelopeError)?;
 
     let mut new_data = Vec::with_capacity(4 + new_env_bytes.len() + (data.len() - envelope_end));
     new_data.extend_from_slice(&new_len.to_le_bytes());
@@ -98,8 +108,8 @@ pub fn attach_recovery_metadata(
 
     envelope.recovery_metadata = Some(recovery_data);
 
-    let new_env_bytes = postcard::to_allocvec(&envelope).map_err(ReleaseError::Serialization)?;
-    let new_len = new_env_bytes.len() as u32;
+    let new_env_bytes = encode_envelope_checked(&envelope)?;
+    let new_len = u32::try_from(new_env_bytes.len()).map_err(|_| ReleaseError::EnvelopeError)?;
 
     let mut new_data = Vec::with_capacity(4 + new_env_bytes.len() + (data.len() - envelope_end));
     new_data.extend_from_slice(&new_len.to_le_bytes());

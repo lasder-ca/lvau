@@ -19,10 +19,19 @@ pub struct HybridPublicKeyFormat {
     pub mlkem_pub: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct HybridPrivateKeyFormat {
     pub x25519_priv: String,
     pub mlkem_priv: String,
+}
+
+impl std::fmt::Debug for HybridPrivateKeyFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridPrivateKeyFormat")
+            .field("x25519_priv", &"<redacted>")
+            .field("mlkem_priv", &"<redacted>")
+            .finish()
+    }
 }
 
 pub struct HybridPublicKey {
