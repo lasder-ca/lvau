@@ -2,7 +2,7 @@ name: Security
 
 on:
   push:
-    branches: [main, master, security/rewrite-20260810]
+    branches: [main, master]
   pull_request:
     branches: [main, master]
   schedule:
