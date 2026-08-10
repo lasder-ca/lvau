@@ -31,19 +31,17 @@ jobs:
       - name: Install Linux GUI dependencies
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libgl1-mesa-dev
 
-      - name: Apply repository and bundle hardening
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 audit/final-hardening.py
-          echo "final-hardening transformation applied"
+      - name: Apply hybrid recipient hardening
+        run: python3 audit/final-hardening.py hybrid
 
       - name: Centralize contributory X25519 derivation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 audit/contributory-helper.py
-          echo "contributory-X25519 transformation applied"
+        run: python3 audit/contributory-helper.py
+
+      - name: Consolidate and harden bundle extraction
+        run: python3 audit/final-hardening.py bundle
+
+      - name: Harden disclosure links and release provenance
+        run: python3 audit/final-hardening.py docs-release
 
       - name: Add private crypto regression
         shell: bash
