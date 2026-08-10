@@ -577,6 +577,26 @@ pub(crate) fn encrypt_file_password_with_content_type(
     Ok(())
 }
 
+fn derive_contributory_x25519(
+    secret: &StaticSecret,
+    public: &X25519PublicKey,
+) -> Result<x25519_dalek::SharedSecret, CryptoError> {
+    // Zero is explicitly non-contributory. The post-DH check also rejects the other
+    // low-order inputs that collapse the classical contribution of the hybrid suite.
+    if public.as_bytes().iter().all(|byte| *byte == 0) {
+        return Err(CryptoError::Validation(
+            "Recipient X25519 public key is non-contributory",
+        ));
+    }
+    let shared = secret.diffie_hellman(public);
+    if !shared.was_contributory() {
+        return Err(CryptoError::Validation(
+            "Recipient X25519 public key is non-contributory",
+        ));
+    }
+    Ok(shared)
+}
+
 pub fn encrypt_file_keypairs(
     in_path: &Path,
     out_path: &Path,
@@ -644,7 +664,7 @@ pub(crate) fn encrypt_file_keypairs_with_content_type(
     for pubkey in recipient_pubs {
         let ephem_x25519_priv = StaticSecret::random();
         let ephem_x25519_pub = X25519PublicKey::from(&ephem_x25519_priv);
-        let x25519_ss = ephem_x25519_priv.diffie_hellman(&pubkey.x25519);
+        let x25519_ss = derive_contributory_x25519(&ephem_x25519_priv, &pubkey.x25519)?;
 
         let (mlkem_ct, mlkem_ss) = pubkey.mlkem.encapsulate();
 
@@ -735,7 +755,10 @@ fn unwrap_keypair_file_key(
         };
 
         let ephem_pub = X25519PublicKey::from(*ephemeral_public_x25519);
-        let x25519_ss = priv_key.x25519.diffie_hellman(&ephem_pub);
+        let x25519_ss = match derive_contributory_x25519(&priv_key.x25519, &ephem_pub) {
+            Ok(shared) => shared,
+            Err(_) => continue,
+        };
         let mlkem_ct = match mlkem_ciphertext.as_slice().try_into() {
             Ok(ciphertext) => ciphertext,
             Err(_) => continue,

@@ -18,7 +18,10 @@ fn extract_payload() -> Result<Vec<u8>, String> {
     extract_payload_from_reader(&mut file, file_len)
 }
 
-fn extract_payload_from_reader<R: Read + Seek>(reader: &mut R, file_len: u64) -> Result<Vec<u8>, String> {
+fn extract_payload_from_reader<R: Read + Seek>(
+    reader: &mut R,
+    file_len: u64,
+) -> Result<Vec<u8>, String> {
     let trailer_start = file_len
         .checked_sub(SFX_TRAILER_SIZE)
         .ok_or_else(|| "File too small to be an SFX.".to_string())?;
@@ -168,10 +171,7 @@ impl eframe::App for SfxExtractorApp {
             ui.add_space(20.0);
 
             if let Some(error) = &self.payload_error {
-                ui.label(
-                    egui::RichText::new(format!("Error: {error}"))
-                        .color(egui::Color32::RED),
-                );
+                ui.label(egui::RichText::new(format!("Error: {error}")).color(egui::Color32::RED));
                 return;
             }
 
@@ -193,7 +193,8 @@ impl eframe::App for SfxExtractorApp {
             } else {
                 ui.horizontal(|ui| {
                     if ui.button("Select Private Key (.lvau-key)").clicked() {
-                        let dialog = rfd::FileDialog::new().add_filter("Private Key", &["lvau-key"]);
+                        let dialog =
+                            rfd::FileDialog::new().add_filter("Private Key", &["lvau-key"]);
                         if let Some(path) = dialog.pick_file() {
                             self.keyfile_path = Some(path);
                         }
@@ -225,7 +226,9 @@ impl eframe::App for SfxExtractorApp {
                 .add_enabled(can_proceed, egui::Button::new("Decrypt & Extract"))
                 .clicked()
             {
-                if let (Some(payload), Some(out_file)) = (self.payload.clone(), self.out_file.clone()) {
+                if let (Some(payload), Some(out_file)) =
+                    (self.payload.clone(), self.out_file.clone())
+                {
                     match self.decrypt(&payload) {
                         Ok(mut plaintext) => {
                             let write_result = write_plaintext_no_clobber(&out_file, &plaintext);
@@ -294,7 +297,10 @@ mod tests {
         let len = bytes.len() as u64;
         let mut cursor = Cursor::new(bytes);
 
-        assert_eq!(extract_payload_from_reader(&mut cursor, len).unwrap(), payload);
+        assert_eq!(
+            extract_payload_from_reader(&mut cursor, len).unwrap(),
+            payload
+        );
     }
 
     #[test]
