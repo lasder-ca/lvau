@@ -3,8 +3,8 @@ use kem::Kem as KemTrait;
 use kem::KeyExport;
 use ml_kem::{DecapsulationKey768, EncapsulationKey768, MlKem768};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
@@ -12,6 +12,7 @@ use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use crate::crypto::CryptoError;
 
 type Kem = MlKem768;
+const MAX_KEY_FILE_SIZE: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HybridPublicKeyFormat {
@@ -45,6 +46,20 @@ pub struct HybridPrivateKey {
 }
 
 #[cfg(windows)]
+struct OwnedHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
 fn set_windows_acl(path: &Path) -> Result<(), std::io::Error> {
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null_mut;
@@ -59,17 +74,21 @@ fn set_windows_acl(path: &Path) -> Result<(), std::io::Error> {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     unsafe {
-        let mut token: HANDLE = 0;
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+        let mut raw_token: HANDLE = 0;
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let token = OwnedHandle(raw_token);
+
+        let mut ret_len = 0;
+        GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut ret_len);
+        if ret_len == 0 {
             return Err(std::io::Error::last_os_error());
         }
 
-        let mut ret_len = 0;
-        GetTokenInformation(token, TokenUser, null_mut(), 0, &mut ret_len);
-
         let mut token_user_buf = vec![0u8; ret_len as usize];
         if GetTokenInformation(
-            token,
+            token.0,
             TokenUser,
             token_user_buf.as_mut_ptr() as *mut core::ffi::c_void,
             ret_len,
@@ -92,14 +111,15 @@ fn set_windows_acl(path: &Path) -> Result<(), std::io::Error> {
         ea.Trustee.ptstrName = user_sid as *mut u16;
 
         let mut new_dacl = null_mut();
-        if SetEntriesInAclW(1, &ea, null_mut(), &mut new_dacl) != ERROR_SUCCESS {
-            return Err(std::io::Error::last_os_error());
+        let acl_status = SetEntriesInAclW(1, &ea, null_mut(), &mut new_dacl);
+        if acl_status != ERROR_SUCCESS {
+            return Err(std::io::Error::from_raw_os_error(acl_status as i32));
         }
 
         let mut path_w: Vec<u16> = path.as_os_str().encode_wide().collect();
         path_w.push(0);
 
-        let res = SetNamedSecurityInfoW(
+        let status = SetNamedSecurityInfoW(
             path_w.as_mut_ptr(),
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
@@ -108,14 +128,28 @@ fn set_windows_acl(path: &Path) -> Result<(), std::io::Error> {
             new_dacl,
             null_mut(),
         );
-
         LocalFree(new_dacl as _);
 
-        if res != ERROR_SUCCESS {
-            return Err(std::io::Error::from_raw_os_error(res as i32));
+        if status != ERROR_SUCCESS {
+            return Err(std::io::Error::from_raw_os_error(status as i32));
         }
     }
     Ok(())
+}
+
+fn read_key_file(path: &Path) -> Result<String, CryptoError> {
+    let file = File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_KEY_FILE_SIZE {
+        return Err(CryptoError::Validation("Key file is invalid or too large"));
+    }
+
+    let mut json = String::new();
+    file.take(MAX_KEY_FILE_SIZE + 1).read_to_string(&mut json)?;
+    if json.len() as u64 > MAX_KEY_FILE_SIZE {
+        return Err(CryptoError::Validation("Key file is invalid or too large"));
+    }
+    Ok(json)
 }
 
 fn write_key_file<P: AsRef<Path>>(
@@ -145,14 +179,12 @@ fn write_key_file<P: AsRef<Path>>(
         .map_err(|error| CryptoError::Io(error.error))?;
 
     #[cfg(windows)]
-    {
-        if private {
-            set_windows_acl(path)?;
-        }
+    if private {
+        set_windows_acl(path)?;
     }
 
     #[cfg(unix)]
-    fs::File::open(parent)?.sync_all()?;
+    File::open(parent)?.sync_all()?;
 
     Ok(())
 }
@@ -179,7 +211,6 @@ pub fn generate_keypair() -> (HybridPrivateKey, HybridPublicKey) {
 impl HybridPublicKey {
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), CryptoError> {
         let x25519_b64 = base64::engine::general_purpose::STANDARD.encode(self.x25519.as_bytes());
-
         let mlkem_b64 =
             base64::engine::general_purpose::STANDARD.encode(self.mlkem.to_bytes().as_slice());
 
@@ -187,16 +218,13 @@ impl HybridPublicKey {
             x25519_pub: x25519_b64,
             mlkem_pub: mlkem_b64,
         };
-
         let json =
             serde_json::to_string_pretty(&format).map_err(|_| CryptoError::DecryptionFailed)?;
-        write_key_file(path, &json, false)?;
-        Ok(())
+        write_key_file(path, &json, false)
     }
 
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, CryptoError> {
-        let json = fs::read_to_string(path)
-            .map_err(|_| CryptoError::Io(std::io::Error::other("IO Error")))?;
+        let json = read_key_file(path.as_ref())?;
         let format: HybridPublicKeyFormat =
             serde_json::from_str(&json).map_err(|_| CryptoError::DecryptionFailed)?;
         Self::from_format(&format)
@@ -231,7 +259,6 @@ impl HybridPublicKey {
 impl HybridPrivateKey {
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), CryptoError> {
         let x25519_b64 = base64::engine::general_purpose::STANDARD.encode(self.x25519.to_bytes());
-
         let mlkem_b64 =
             base64::engine::general_purpose::STANDARD.encode(self.mlkem.to_bytes().as_slice());
 
@@ -239,16 +266,13 @@ impl HybridPrivateKey {
             x25519_priv: x25519_b64,
             mlkem_priv: mlkem_b64,
         };
-
         let json =
             serde_json::to_string_pretty(&format).map_err(|_| CryptoError::DecryptionFailed)?;
-        write_key_file(path, &json, true)?;
-        Ok(())
+        write_key_file(path, &json, true)
     }
 
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, CryptoError> {
-        let json = fs::read_to_string(path)
-            .map_err(|_| CryptoError::Io(std::io::Error::other("IO Error")))?;
+        let json = read_key_file(path.as_ref())?;
         let format: HybridPrivateKeyFormat =
             serde_json::from_str(&json).map_err(|_| CryptoError::DecryptionFailed)?;
 
@@ -279,6 +303,18 @@ impl HybridPrivateKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_key_file_is_rejected_before_json_parsing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oversized.key");
+        fs::write(&path, vec![b'x'; MAX_KEY_FILE_SIZE as usize + 1]).unwrap();
+
+        assert!(matches!(
+            HybridPrivateKey::load_from_file(&path),
+            Err(CryptoError::Validation("Key file is invalid or too large"))
+        ));
+    }
 
     #[test]
     #[cfg(unix)]
