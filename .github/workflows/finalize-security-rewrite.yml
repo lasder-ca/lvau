@@ -31,9 +31,45 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libgl1-mesa-dev
 
       - name: Apply fail-closed final hardening
+        shell: bash
         run: |
           set -euo pipefail
           python3 audit/final-hardening.py
+
+          # Keep this regression beside the rest of crypto's unit tests so it uses the same
+          # private protocol types without widening lvau-core's public API just for testing.
+          rm -f crates/lvau-core/tests/hybrid_hardening.rs
+          cat >> crates/lvau-core/src/crypto/tests.rs <<'RS'
+
+          #[test]
+          fn encryption_rejects_non_contributory_x25519_recipient() {
+              let input = unique_path("non-contributory-x25519.input");
+              let output = unique_path("non-contributory-x25519.lvau");
+              fs::write(&input, b"hybrid-hardening").unwrap();
+
+              let (_private_key, mut recipient) = generate_keypair();
+              recipient.x25519 = x25519_dalek::PublicKey::from([0u8; 32]);
+
+              let error = encrypt_file_keypairs(
+                  &input,
+                  &output,
+                  &[recipient],
+                  SecurityProfile::Fast,
+                  None,
+                  None,
+                  false,
+              )
+              .unwrap_err();
+
+              assert!(matches!(
+                  error,
+                  CryptoError::Validation("Recipient X25519 public key is non-contributory")
+              ));
+              assert!(!output.exists());
+              let _ = fs::remove_file(input);
+          }
+          RS
+
           cargo fmt --all
           git diff --check
 
