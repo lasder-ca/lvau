@@ -12,7 +12,43 @@ use tempfile::NamedTempFile;
 const CURRENT_SHARE_VERSION: u32 = 2;
 const MAX_SHARE_FILE_SIZE: usize = 1024 * 1024;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+fn write_private_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), CryptoError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = NamedTempFile::new_in(parent)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o600))?;
+    }
+
+    temp.write_all(bytes)?;
+    temp.as_file().sync_all()?;
+
+    #[cfg(windows)]
+    if force && path.exists() {
+        fs::remove_file(path)?;
+    }
+
+    let persisted = if force {
+        temp.persist(path)
+    } else {
+        temp.persist_noclobber(path)
+    };
+    persisted.map_err(|error| {
+        if !force && error.error.kind() == std::io::ErrorKind::AlreadyExists {
+            CryptoError::OutputExists
+        } else {
+            CryptoError::Io(error.error)
+        }
+    })?;
+
+    #[cfg(unix)]
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RecoveryShare {
     pub magic: [u8; 4],
     pub version: u32,
@@ -22,24 +58,29 @@ pub struct RecoveryShare {
     pub share_data: Vec<u8>,
 }
 
+impl std::fmt::Debug for RecoveryShare {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecoveryShare")
+            .field("magic", &self.magic)
+            .field("version", &self.version)
+            .field("index", &self.index)
+            .field("threshold", &self.threshold)
+            .field("fingerprint", &self.fingerprint)
+            .field("share_data_len", &self.share_data.len())
+            .finish()
+    }
+}
+
 impl RecoveryShare {
     pub fn to_file(&self, path: &Path) -> Result<(), CryptoError> {
+        // Preserve the public API's historical overwrite behavior. Callers that
+        // require no-clobber semantics must opt into it explicitly below.
+        self.to_file_with_force(path, true)
+    }
+
+    pub fn to_file_with_force(&self, path: &Path, force: bool) -> Result<(), CryptoError> {
         let encoded = postcard::to_allocvec(self)?;
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let mut temp = NamedTempFile::new_in(parent)?;
-        temp.write_all(&encoded)?;
-        temp.as_file().sync_all()?;
-
-        #[cfg(windows)]
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
-        temp.persist(path)
-            .map_err(|error| CryptoError::Io(error.error))?;
-
-        #[cfg(unix)]
-        fs::File::open(parent)?.sync_all()?;
-        Ok(())
+        write_private_atomic(path, &encoded, force)
     }
 
     pub fn from_file(path: &Path) -> Result<Self, CryptoError> {
@@ -66,6 +107,10 @@ impl RecoveryShare {
         }
         Ok(share)
     }
+}
+
+pub fn write_recovered_secret(path: &Path, secret: &[u8], force: bool) -> Result<(), CryptoError> {
+    write_private_atomic(path, secret, force)
 }
 
 pub fn split_secret(
@@ -191,6 +236,52 @@ mod tests {
         let share = split_secret(b"secret", 2, 2).unwrap().remove(0);
         share.to_file(&path).unwrap();
 
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn recovery_share_to_file_preserves_overwrite_behavior() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret.lvau-share");
+        let mut shares = split_secret(b"secret", 2, 2).unwrap();
+        let first = shares.remove(0);
+        let replacement = shares.remove(0);
+
+        first.to_file(&path).unwrap();
+        replacement.to_file(&path).unwrap();
+
+        let loaded = RecoveryShare::from_file(&path).unwrap();
+        assert_eq!(loaded.index, replacement.index);
+        assert_eq!(loaded.share_data, replacement.share_data);
+    }
+
+    #[test]
+    fn recovery_share_explicit_no_clobber_preserves_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret.lvau-share");
+        fs::write(&path, b"keep me").unwrap();
+        let share = split_secret(b"secret", 2, 2).unwrap().remove(0);
+
+        assert!(matches!(
+            share.to_file_with_force(&path, false),
+            Err(CryptoError::OutputExists)
+        ));
+        assert_eq!(fs::read(path).unwrap(), b"keep me");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn recovered_secret_is_written_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recovered.key");
+        write_recovered_secret(&path, b"secret bytes", false).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"secret bytes");
         assert_eq!(
             fs::metadata(path).unwrap().permissions().mode() & 0o777,
             0o600

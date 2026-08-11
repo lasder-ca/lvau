@@ -17,6 +17,14 @@ const AUTHOR_SIGNATURE_V2_DOMAIN: &[u8] = b"Lvau author signature v2\0";
 const APPROVAL_SIGNATURE_V2_DOMAIN: &[u8] = b"Lvau approval signature v2\0";
 const APPROVAL_ARTIFACT_V2_DOMAIN: &[u8] = b"Lvau approval artifact v2\0";
 
+fn encode_envelope_checked(envelope: &Envelope) -> Result<Vec<u8>, SigningError> {
+    let bytes = postcard::to_allocvec(envelope)?;
+    if bytes.is_empty() || bytes.len() > crate::crypto::MAX_ENVELOPE_SIZE {
+        return Err(SigningError::InvalidEnvelope);
+    }
+    Ok(bytes)
+}
+
 fn write_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), SigningError> {
     if path.exists() && !force {
         return Err(SigningError::OutputExists(path.display().to_string()));
@@ -84,9 +92,17 @@ pub enum SigningError {
 }
 
 /// Serializable signing key pair file format.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct SigningKeyFile {
     pub ed25519_signing_key: String, // base64-encoded 32-byte seed
+}
+
+impl std::fmt::Debug for SigningKeyFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SigningKeyFile")
+            .field("ed25519_signing_key", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Serializable verify key file format.
@@ -290,9 +306,11 @@ pub fn sign_file(
         .expect("signature metadata was just initialized")
         .signature = signature.to_bytes().to_vec();
 
-    // Serialize the full envelope with signature
-    let signed_envelope_bytes = postcard::to_allocvec(&envelope)?;
-    let signed_env_len = signed_envelope_bytes.len() as u32;
+    // Serialize the full envelope with signature, preserving the parser's
+    // envelope-size invariant.
+    let signed_envelope_bytes = encode_envelope_checked(&envelope)?;
+    let signed_env_len =
+        u32::try_from(signed_envelope_bytes.len()).map_err(|_| SigningError::InvalidEnvelope)?;
 
     // Write the signed file
     let mut output = Vec::with_capacity(4 + signed_envelope_bytes.len() + ciphertext.len());
@@ -378,9 +396,11 @@ pub fn add_approval_seal(
 
     envelope.approvals.push(approval);
 
-    // Re-serialize the envelope
-    let new_envelope_bytes = postcard::to_allocvec(&envelope)?;
-    let new_env_len = new_envelope_bytes.len() as u32;
+    // Re-serialize the envelope without producing a capsule that the parser
+    // would reject as oversized.
+    let new_envelope_bytes = encode_envelope_checked(&envelope)?;
+    let new_env_len =
+        u32::try_from(new_envelope_bytes.len()).map_err(|_| SigningError::InvalidEnvelope)?;
 
     let mut output = Vec::with_capacity(4 + new_envelope_bytes.len() + ciphertext.len());
     output.extend_from_slice(&new_env_len.to_le_bytes());
@@ -449,6 +469,39 @@ mod tests {
 
         let fingerprint = verify_signature(&signed, &verify_key).unwrap();
         assert_eq!(fingerprint, key_fingerprint(&verify_key));
+    }
+
+    #[test]
+    fn oversized_signature_metadata_is_rejected_without_output() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("input.txt");
+        let encrypted = dir.path().join("encrypted.lvau");
+        let signed = dir.path().join("signed.lvau");
+        fs::write(&input, "metadata bound test").unwrap();
+
+        encrypt_file_password(
+            &input,
+            &encrypted,
+            SecretString::from("password".to_string()),
+            None,
+            SecurityProfile::Fast,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+
+        let (signing_key, _) = generate_signing_keypair();
+        let result = sign_file(
+            &encrypted,
+            &signed,
+            &signing_key,
+            Some("x".repeat(crate::crypto::MAX_ENVELOPE_SIZE)),
+            false,
+        );
+
+        assert!(matches!(result, Err(SigningError::InvalidEnvelope)));
+        assert!(!signed.exists());
     }
 
     #[test]

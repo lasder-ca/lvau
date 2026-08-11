@@ -4,7 +4,7 @@
 
 Do not disclose a suspected vulnerability in a public issue, discussion, pull
 request, log, or test fixture. Open a
-[private GitHub security advisory](https://github.com/latteworkspace/lvau/security/advisories/new)
+[private GitHub security advisory](https://github.com/lasder-ca/lvau/security/advisories/new)
 with:
 
 - affected versions and environment;
@@ -16,7 +16,7 @@ with:
 Do not include real passwords, private keys, tokens, user files, OCIDs, or
 production service data. If the advisory form is unavailable, contact the
 maintainers through the current
-[latteworkspace organization profile](https://github.com/latteworkspace)
+[lasder-ca profile](https://github.com/lasder-ca)
 without publishing exploit details.
 
 ## Scope

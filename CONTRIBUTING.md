@@ -13,7 +13,7 @@ Cargo, `rustfmt`, and Clippy. Native Windows and macOS behavior is exercised in
 GitHub Actions.
 
 ```sh
-git clone https://github.com/latteworkspace/lvau.git
+git clone https://github.com/lasder-ca/lvau.git
 cd lvau
 rustup component add rustfmt clippy
 cargo build --locked --workspace

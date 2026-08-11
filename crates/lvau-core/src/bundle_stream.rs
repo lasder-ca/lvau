@@ -12,7 +12,7 @@ use secrecy::SecretString;
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tempfile::{tempdir, NamedTempFile, TempDir};
 use walkdir::WalkDir;
 
@@ -448,6 +448,51 @@ fn validate_existing_target(path: &Path) -> Result<(), BundleError> {
     Ok(())
 }
 
+fn validate_extraction_directory(path: &Path) -> Result<(), BundleError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(BundleError::SymlinkRejected(path.display().to_string()));
+    }
+    if !metadata.file_type().is_dir() {
+        return Err(BundleError::SpecialFileRejected(path.display().to_string()));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(BundleError::SymlinkRejected(path.display().to_string()));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_safe_extraction_parent(out_dir: &Path, parent: &Path) -> Result<(), BundleError> {
+    validate_extraction_directory(out_dir)?;
+    let relative = parent.strip_prefix(out_dir).map_err(|_| {
+        BundleError::PathTraversal(format!(
+            "Extraction parent is outside output directory: {}",
+            parent.display()
+        ))
+    })?;
+    let mut current = out_dir.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(BundleError::PathTraversal(parent.display().to_string()));
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(_) => validate_extraction_directory(&current)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&current)?;
+                validate_extraction_directory(&current)?;
+            }
+            Err(error) => return Err(BundleError::Io(error)),
+        }
+    }
+    Ok(())
+}
+
 fn persist_output(temp: NamedTempFile, target: &Path, force: bool) -> Result<(), BundleError> {
     if force && target.exists() {
         validate_existing_target(target)?;
@@ -524,12 +569,13 @@ pub fn extract_bundle(
     }
 
     fs::create_dir_all(out_dir)?;
+    validate_extraction_directory(out_dir)?;
     let canonical_out = out_dir.canonicalize()?;
     for entry in &bundle.manifest.entries {
         let relative = validate_relative_path(&entry.relative_path)?;
         let target = out_dir.join(relative);
         let parent = target.parent().unwrap_or(out_dir);
-        fs::create_dir_all(parent)?;
+        ensure_safe_extraction_parent(out_dir, parent)?;
         let canonical_parent = parent.canonicalize()?;
         if !canonical_parent.starts_with(&canonical_out) {
             return Err(BundleError::PathTraversal(format!(
@@ -585,6 +631,21 @@ mod tests {
     #[test]
     fn copy_buffer_is_bounded() {
         assert_eq!(BUNDLE_COPY_BUFFER_SIZE, 64 * 1024);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn extraction_rejects_symlinked_parent_even_inside_output_root() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let output = dir.path().join("output");
+        let real = output.join("real");
+        fs::create_dir_all(&real).unwrap();
+        symlink(&real, output.join("alias")).unwrap();
+
+        let error = ensure_safe_extraction_parent(&output, &output.join("alias")).unwrap_err();
+        assert!(matches!(error, BundleError::SymlinkRejected(_)));
     }
 
     #[test]

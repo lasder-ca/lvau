@@ -840,6 +840,20 @@ fn ensure_input_file(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
+fn ensure_distinct_file_paths(input: &Path, output: &Path) -> Result<(), CliError> {
+    let same_path = if output.exists() {
+        fs::canonicalize(input)? == fs::canonicalize(output)?
+    } else {
+        input == output
+    };
+    if same_path {
+        return Err(CliError::Message(
+            "Input and output paths must be different".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_output_available(path: &Path, force: bool) -> Result<(), CliError> {
     if path.exists() && !force {
         return Err(CliError::Message(format!(
@@ -988,6 +1002,7 @@ fn run() -> Result<(), CliError> {
             allow_policy_override,
         } => {
             ensure_input_file(&in_file)?;
+            ensure_distinct_file_paths(&in_file, &out_file)?;
             ensure_output_available(&out_file, force)?;
 
             let has_password = password || password_file.is_some();
@@ -1082,6 +1097,7 @@ fn run() -> Result<(), CliError> {
             force,
         } => {
             ensure_input_file(&in_file)?;
+            ensure_distinct_file_paths(&in_file, &out_file)?;
             ensure_output_available(&out_file, force)?;
             require_one_mode(
                 password,
@@ -1897,11 +1913,20 @@ fn run() -> Result<(), CliError> {
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("secret");
+                let share_outputs = generated_shares
+                    .into_iter()
+                    .map(|share| {
+                        let path =
+                            out_dir.join(format!("{}.{}.lvau-share", file_stem, share.index));
+                        (share, path)
+                    })
+                    .collect::<Vec<_>>();
 
-                for share in generated_shares {
-                    let share_path =
-                        out_dir.join(format!("{}.{}.lvau-share", file_stem, share.index));
-                    share.to_file(&share_path).map_err(|e| {
+                for (_, share_path) in &share_outputs {
+                    ensure_output_available(share_path, false)?;
+                }
+                for (share, share_path) in share_outputs {
+                    share.to_file_with_force(&share_path, false).map_err(|e| {
                         CliError::Message(format!("Failed to write share: {:?}", e))
                     })?;
                     println!("Generated share: {}", share_path.display());
@@ -1945,7 +1970,7 @@ fn run() -> Result<(), CliError> {
                 let recovered = combine_shares(&loaded_shares)
                     .map_err(|e| CliError::Message(format!("Failed to combine shares: {:?}", e)))?;
 
-                fs::write(&out_file, recovered).map_err(CliError::Io)?;
+                lvau_core::recovery::write_recovered_secret(&out_file, &recovered, force)?;
                 println!("Successfully recovered secret to {}", out_file.display());
             }
             RecoveryAction::Inspect { in_file } => {

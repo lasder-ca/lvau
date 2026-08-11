@@ -761,3 +761,16 @@ fn wrong_keypair_fails() {
     let result = decrypt_file_keypair(&enc, &dec, &private_key2, None);
     assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 }
+
+#[test]
+fn zero_x25519_peer_is_rejected_by_hybrid_contributory_helper() {
+    let secret = x25519_dalek::StaticSecret::from([42u8; 32]);
+    let public = x25519_dalek::PublicKey::from([0u8; 32]);
+
+    assert!(matches!(
+        derive_contributory_x25519(&secret, &public),
+        Err(CryptoError::Validation(
+            "Recipient X25519 public key is non-contributory"
+        ))
+    ));
+}
