@@ -5,6 +5,7 @@ on:
     branches: [security/hardening-20260811]
     paths:
       - audit/hardening-20260811.py
+      - .github/workflows/hardening-20260811.yml
 
 permissions:
   contents: write
