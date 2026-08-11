@@ -75,9 +75,19 @@ jobs:
       - name: Audit without quick-xml exceptions
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cargo install cargo-audit --locked
-          cargo audit --locked
+          CARGO_TERM_COLOR=never cargo audit --locked 2>&1 | tee audit-output.txt
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add audit-output.txt
+            git commit -m "chore(audit): capture unresolved advisory"
+            git push origin HEAD:security/quick-xml-20260811
+            exit "$status"
+          fi
+          rm -f audit-output.txt
 
       - name: Commit validated remediation
         shell: bash
