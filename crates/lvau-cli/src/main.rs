@@ -1926,7 +1926,7 @@ fn run() -> Result<(), CliError> {
                     ensure_output_available(share_path, false)?;
                 }
                 for (share, share_path) in share_outputs {
-                    share.to_file(&share_path).map_err(|e| {
+                    share.to_file_with_force(&share_path, false).map_err(|e| {
                         CliError::Message(format!("Failed to write share: {:?}", e))
                     })?;
                     println!("Generated share: {}", share_path.display());

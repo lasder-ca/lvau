@@ -73,7 +73,9 @@ impl std::fmt::Debug for RecoveryShare {
 
 impl RecoveryShare {
     pub fn to_file(&self, path: &Path) -> Result<(), CryptoError> {
-        self.to_file_with_force(path, false)
+        // Preserve the public API's historical overwrite behavior. Callers that
+        // require no-clobber semantics must opt into it explicitly below.
+        self.to_file_with_force(path, true)
     }
 
     pub fn to_file_with_force(&self, path: &Path, force: bool) -> Result<(), CryptoError> {
@@ -241,14 +243,30 @@ mod tests {
     }
 
     #[test]
-    fn recovery_share_refuses_to_clobber_existing_file() {
+    fn recovery_share_to_file_preserves_overwrite_behavior() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret.lvau-share");
+        let mut shares = split_secret(b"secret", 2, 2).unwrap();
+        let first = shares.remove(0);
+        let replacement = shares.remove(0);
+
+        first.to_file(&path).unwrap();
+        replacement.to_file(&path).unwrap();
+
+        let loaded = RecoveryShare::from_file(&path).unwrap();
+        assert_eq!(loaded.index, replacement.index);
+        assert_eq!(loaded.share_data, replacement.share_data);
+    }
+
+    #[test]
+    fn recovery_share_explicit_no_clobber_preserves_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secret.lvau-share");
         fs::write(&path, b"keep me").unwrap();
         let share = split_secret(b"secret", 2, 2).unwrap().remove(0);
 
         assert!(matches!(
-            share.to_file(&path),
+            share.to_file_with_force(&path, false),
             Err(CryptoError::OutputExists)
         ));
         assert_eq!(fs::read(path).unwrap(), b"keep me");

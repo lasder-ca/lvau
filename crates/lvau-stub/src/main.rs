@@ -226,21 +226,25 @@ impl eframe::App for SfxExtractorApp {
                 .add_enabled(can_proceed, egui::Button::new("Decrypt & Extract"))
                 .clicked()
             {
-                if let (Some(payload), Some(out_file)) =
-                    (self.payload.clone(), self.out_file.clone())
-                {
-                    match self.decrypt(&payload) {
-                        Ok(mut plaintext) => {
-                            let write_result = write_plaintext_no_clobber(&out_file, &plaintext);
-                            plaintext.fill(0);
-                            self.status = match write_result {
-                                Ok(()) => "Extraction Successful!".to_string(),
-                                Err(error) => error,
-                            };
-                        }
-                        Err(_) => {
-                            self.status =
-                                "Decryption Failed! Wrong password or corrupted file.".to_string();
+                if let Some(out_file) = self.out_file.clone() {
+                    if let Some(payload) = self.payload.take() {
+                        let decrypt_result = self.decrypt(&payload);
+                        self.payload = Some(payload);
+                        match decrypt_result {
+                            Ok(mut plaintext) => {
+                                let write_result =
+                                    write_plaintext_no_clobber(&out_file, &plaintext);
+                                plaintext.fill(0);
+                                self.status = match write_result {
+                                    Ok(()) => "Extraction Successful!".to_string(),
+                                    Err(error) => error,
+                                };
+                            }
+                            Err(_) => {
+                                self.status =
+                                    "Decryption Failed! Wrong password or corrupted file."
+                                        .to_string();
+                            }
                         }
                     }
                 }
