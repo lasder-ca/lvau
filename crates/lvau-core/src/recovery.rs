@@ -4,13 +4,28 @@ use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::fs;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 
 const CURRENT_SHARE_VERSION: u32 = 2;
-const MAX_SHARE_FILE_SIZE: usize = 1024 * 1024;
+const MAX_SHARE_FILE_SIZE: u64 = 1024 * 1024;
+
+fn read_share_file(path: &Path) -> Result<Vec<u8>, CryptoError> {
+    let file = File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_SHARE_FILE_SIZE {
+        return Err(CryptoError::Validation("Recovery share is too large"));
+    }
+
+    let mut bytes = Vec::new();
+    file.take(MAX_SHARE_FILE_SIZE + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SHARE_FILE_SIZE {
+        return Err(CryptoError::Validation("Recovery share is too large"));
+    }
+    Ok(bytes)
+}
 
 fn write_private_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), CryptoError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -43,8 +58,11 @@ fn write_private_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), Cr
         }
     })?;
 
+    #[cfg(windows)]
+    crate::crypto::keys::set_windows_acl(path)?;
+
     #[cfg(unix)]
-    fs::File::open(parent)?.sync_all()?;
+    File::open(parent)?.sync_all()?;
     Ok(())
 }
 
@@ -84,10 +102,7 @@ impl RecoveryShare {
     }
 
     pub fn from_file(path: &Path) -> Result<Self, CryptoError> {
-        let bytes = fs::read(path)?;
-        if bytes.len() > MAX_SHARE_FILE_SIZE {
-            return Err(CryptoError::Validation("Recovery share is too large"));
-        }
+        let bytes = read_share_file(path)?;
         let (share, remaining): (Self, &[u8]) = postcard::take_from_bytes(&bytes)?;
         if !remaining.is_empty() {
             return Err(CryptoError::Validation(
@@ -270,6 +285,18 @@ mod tests {
             Err(CryptoError::OutputExists)
         ));
         assert_eq!(fs::read(path).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn oversized_recovery_share_is_rejected_before_decode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oversized.lvau-share");
+        fs::write(&path, vec![0u8; MAX_SHARE_FILE_SIZE as usize + 1]).unwrap();
+
+        assert!(matches!(
+            RecoveryShare::from_file(&path),
+            Err(CryptoError::Validation("Recovery share is too large"))
+        ));
     }
 
     #[test]

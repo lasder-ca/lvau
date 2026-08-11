@@ -60,7 +60,7 @@ impl Drop for OwnedHandle {
 }
 
 #[cfg(windows)]
-fn set_windows_acl(path: &Path) -> Result<(), std::io::Error> {
+pub(crate) fn set_windows_acl(path: &Path) -> Result<(), std::io::Error> {
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HANDLE};

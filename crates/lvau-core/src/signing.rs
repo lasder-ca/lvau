@@ -7,8 +7,8 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use lvau_protocol::envelope::{ApprovalSignature, Envelope, EnvelopeSignature};
 use rand_core::OsRng;
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -16,6 +16,27 @@ use thiserror::Error;
 const AUTHOR_SIGNATURE_V2_DOMAIN: &[u8] = b"Lvau author signature v2\0";
 const APPROVAL_SIGNATURE_V2_DOMAIN: &[u8] = b"Lvau approval signature v2\0";
 const APPROVAL_ARTIFACT_V2_DOMAIN: &[u8] = b"Lvau approval artifact v2\0";
+const MAX_SIGNING_KEY_FILE_SIZE: u64 = 64 * 1024;
+
+fn read_key_file(path: &Path) -> Result<String, SigningError> {
+    let file = File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_SIGNING_KEY_FILE_SIZE {
+        return Err(SigningError::InvalidKey(
+            "Key file is invalid or too large".into(),
+        ));
+    }
+
+    let mut json = String::new();
+    file.take(MAX_SIGNING_KEY_FILE_SIZE + 1)
+        .read_to_string(&mut json)?;
+    if json.len() as u64 > MAX_SIGNING_KEY_FILE_SIZE {
+        return Err(SigningError::InvalidKey(
+            "Key file is invalid or too large".into(),
+        ));
+    }
+    Ok(json)
+}
 
 fn encode_envelope_checked(envelope: &Envelope) -> Result<Vec<u8>, SigningError> {
     let bytes = postcard::to_allocvec(envelope)?;
@@ -49,6 +70,43 @@ fn write_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), SigningErr
 
     #[cfg(unix)]
     fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+fn write_private_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), SigningError> {
+    if path.exists() && !force {
+        return Err(SigningError::OutputExists(path.display().to_string()));
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = NamedTempFile::new_in(parent)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o600))?;
+    }
+
+    temp.write_all(bytes)?;
+    temp.as_file().sync_all()?;
+
+    #[cfg(windows)]
+    if force && path.exists() {
+        fs::remove_file(path)?;
+    }
+
+    if force {
+        temp.persist(path)
+            .map_err(|error| SigningError::Io(error.error))?;
+    } else {
+        temp.persist_noclobber(path)
+            .map_err(|error| SigningError::Io(error.error))?;
+    }
+
+    #[cfg(windows)]
+    crate::crypto::keys::set_windows_acl(path)?;
+
+    #[cfg(unix)]
+    File::open(parent)?.sync_all()?;
     Ok(())
 }
 
@@ -196,12 +254,12 @@ pub fn save_signing_key(key: &SigningKey, path: &Path, force: bool) -> Result<()
     let json = serde_json::to_string_pretty(&file_data)
         .map_err(|_| SigningError::InvalidKey("JSON serialization failed".into()))?;
 
-    write_atomic(path, json.as_bytes(), force)
+    write_private_atomic(path, json.as_bytes(), force)
 }
 
 /// Load a signing key from a file.
 pub fn load_signing_key(path: &Path) -> Result<SigningKey, SigningError> {
-    let json = fs::read_to_string(path)?;
+    let json = read_key_file(path)?;
     let file_data: SigningKeyFile = serde_json::from_str(&json)
         .map_err(|_| SigningError::InvalidKey("Invalid signing key JSON".into()))?;
     let bytes = base64::Engine::decode(
@@ -240,7 +298,7 @@ pub fn save_verify_key(key: &VerifyingKey, path: &Path, force: bool) -> Result<(
 
 /// Load a verifying key from a file.
 pub fn load_verify_key(path: &Path) -> Result<VerifyingKey, SigningError> {
-    let json = fs::read_to_string(path)?;
+    let json = read_key_file(path)?;
     let file_data: VerifyKeyFile = serde_json::from_str(&json)
         .map_err(|_| SigningError::InvalidKey("Invalid verify key JSON".into()))?;
     let bytes = base64::Engine::decode(
@@ -799,5 +857,38 @@ mod tests {
 
         verify_signature(&approved, &author_verify_key).unwrap();
         assert!(verify_approvals(&approved, &approval_verify_key).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod private_file_hardening_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_signing_key_file_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oversized.lvau-sign");
+        fs::write(&path, vec![b'x'; MAX_SIGNING_KEY_FILE_SIZE as usize + 1]).unwrap();
+
+        assert!(matches!(
+            load_signing_key(&path),
+            Err(SigningError::InvalidKey(message)) if message == "Key file is invalid or too large"
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn signing_key_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret.lvau-sign");
+        let (key, _) = generate_signing_keypair();
+        save_signing_key(&key, &path, false).unwrap();
+
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }
