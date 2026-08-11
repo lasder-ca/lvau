@@ -26,13 +26,36 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+
           for name in ["crates/lvau-gui/Cargo.toml", "crates/lvau-stub/Cargo.toml"]:
               p = Path(name)
               s = p.read_text()
               s = s.replace('eframe = "0.29.1"', 'eframe = "0.35.0"')
               s = s.replace('egui = "0.29.1"', 'egui = "0.35.0"')
               p.write_text(s)
+
+          gui = Path("crates/lvau-gui/src/main.rs")
+          s = gui.read_text()
+          s = s.replace(
+              'fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {',
+              'fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {',
+              1,
+          )
+          s = s.replace('ctx.request_repaint_after(Duration::from_millis(100));', 'ui.ctx().request_repaint_after(Duration::from_millis(100));', 1)
+          s = s.replace('egui::CentralPanel::default().show(ctx, |ui| {', 'egui::CentralPanel::default().show(ui, |ui| {', 1)
+          gui.write_text(s)
+
+          stub = Path("crates/lvau-stub/src/main.rs")
+          s = stub.read_text()
+          s = s.replace(
+              'fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {',
+              'fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {',
+              1,
+          )
+          s = s.replace('egui::CentralPanel::default().show(ctx, |ui| {', 'egui::CentralPanel::default().show(ui, |ui| {', 1)
+          stub.write_text(s)
           PY
+          cargo fmt --all
           cargo update
           echo '=== quick-xml remaining ==='
           grep -A4 -B1 'name = "quick-xml"' Cargo.lock || true
