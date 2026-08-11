@@ -39,6 +39,7 @@ jobs:
           set -euo pipefail
           cargo update -p eframe --precise 0.33.3
           cargo update -p egui --precise 0.33.3
+          cargo update -p wayland-scanner --precise 0.31.11
 
       - name: Require patched quick-xml only
         shell: bash
