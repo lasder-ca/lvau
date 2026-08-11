@@ -37,6 +37,9 @@ fn write_private_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), Cr
         fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o600))?;
     }
 
+    #[cfg(windows)]
+    crate::crypto::keys::set_windows_acl(temp.path())?;
+
     temp.write_all(bytes)?;
     temp.as_file().sync_all()?;
 
@@ -57,9 +60,6 @@ fn write_private_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<(), Cr
             CryptoError::Io(error.error)
         }
     })?;
-
-    #[cfg(windows)]
-    crate::crypto::keys::set_windows_acl(path)?;
 
     #[cfg(unix)]
     File::open(parent)?.sync_all()?;

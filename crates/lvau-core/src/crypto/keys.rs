@@ -168,6 +168,11 @@ fn write_key_file<P: AsRef<Path>>(
         fs::set_permissions(temp.path(), fs::Permissions::from_mode(mode))?;
     }
 
+    #[cfg(windows)]
+    if private {
+        set_windows_acl(temp.path())?;
+    }
+
     temp.write_all(contents.as_bytes())?;
     temp.as_file().sync_all()?;
 
@@ -177,11 +182,6 @@ fn write_key_file<P: AsRef<Path>>(
     }
     temp.persist(path)
         .map_err(|error| CryptoError::Io(error.error))?;
-
-    #[cfg(windows)]
-    if private {
-        set_windows_acl(path)?;
-    }
 
     #[cfg(unix)]
     File::open(parent)?.sync_all()?;
