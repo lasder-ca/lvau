@@ -1,0 +1,43 @@
+name: eframe 0.33 audit 20260811
+
+on:
+  push:
+    branches: [audit/eframe-033-20260811]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  migrate-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          components: clippy,rustfmt
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libgl1-mesa-dev
+      - name: Try eframe/egui 0.33.3 migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ["crates/lvau-gui/Cargo.toml", "crates/lvau-stub/Cargo.toml"]:
+              p = Path(name)
+              s = p.read_text()
+              s = s.replace('eframe = "0.29.1"', 'eframe = "0.33.3"')
+              s = s.replace('egui = "0.29.1"', 'egui = "0.33.3"')
+              p.write_text(s)
+          PY
+          cargo update
+          cargo fmt --all --check
+          echo '=== quick-xml remaining ==='
+          grep -A4 -B1 'name = "quick-xml"' Cargo.lock || true
+          cargo tree -i quick-xml 2>/dev/null || true
+          cargo check --workspace --all-targets --all-features
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
