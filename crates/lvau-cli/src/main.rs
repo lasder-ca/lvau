@@ -904,6 +904,21 @@ fn require_one_mode(
     }
 }
 
+fn copy_exact_len(
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    expected_len: u64,
+    label: &str,
+) -> Result<(), CliError> {
+    let copied = io::copy(input, output)?;
+    if copied != expected_len {
+        return Err(CliError::Message(format!(
+            "{label} changed while being copied: expected {expected_len} bytes, copied {copied}"
+        )));
+    }
+    Ok(())
+}
+
 fn create_sfx(temp_out: &Path, out_file: &Path, force: bool) -> Result<(), CliError> {
     let exe_dir = std::env::current_exe()?
         .parent()
@@ -936,7 +951,7 @@ fn create_sfx(temp_out: &Path, out_file: &Path, force: bool) -> Result<(), CliEr
     io::copy(&mut stub, &mut output)?;
     let mut payload = fs::File::open(temp_out)?;
     let payload_len = payload.metadata()?.len();
-    io::copy(&mut payload, &mut output)?;
+    copy_exact_len(&mut payload, &mut output, payload_len, "SFX payload")?;
     output.write_all(&payload_len.to_le_bytes())?;
     output.write_all(b"LVAUSFX1")?;
     output.as_file().sync_all()?;
@@ -2558,7 +2573,17 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_secret_file, MAX_SECRET_FILE_SIZE};
+    use super::{copy_exact_len, read_secret_file, MAX_SECRET_FILE_SIZE};
+    use std::io::Cursor;
+
+    #[test]
+    fn sfx_payload_copy_rejects_length_changes() {
+        let mut source = Cursor::new(vec![0x5au8; 3]);
+        let mut output = Vec::new();
+        let error = copy_exact_len(&mut source, &mut output, 4, "SFX payload").unwrap_err();
+        assert!(error.to_string().contains("changed while being copied"));
+        assert_eq!(output.len(), 3);
+    }
 
     #[test]
     fn oversized_secret_file_is_rejected_before_reading() {
