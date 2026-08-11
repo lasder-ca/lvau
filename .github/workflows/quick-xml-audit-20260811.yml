@@ -1,0 +1,37 @@
+name: Quick XML audit 20260811
+
+on:
+  push:
+    branches: [audit/quick-xml-20260811]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - name: Show reverse dependency trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== quick-xml 0.30.0 ==='
+          cargo tree --locked -i quick-xml@0.30.0
+          echo '=== quick-xml 0.39.4 ==='
+          cargo tree --locked -i quick-xml@0.39.4
+          echo '=== direct upgrade probes ==='
+          cp Cargo.lock /tmp/Cargo.lock.original
+          if cargo update -p quick-xml@0.39.4 --precise 0.41.0; then
+            echo 'UPGRADE_039_TO_041=YES'
+          else
+            echo 'UPGRADE_039_TO_041=NO'
+          fi
+          cp /tmp/Cargo.lock.original Cargo.lock
+          if cargo update -p quick-xml@0.30.0 --precise 0.41.0; then
+            echo 'UPGRADE_030_TO_041=YES'
+          else
+            echo 'UPGRADE_030_TO_041=NO'
+          fi
+          cp /tmp/Cargo.lock.original Cargo.lock
