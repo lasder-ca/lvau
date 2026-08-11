@@ -1,0 +1,55 @@
+name: Config save limit fix 20260811
+
+on:
+  push:
+    branches: [security/config-io-20260811]
+    paths:
+      - audit/config-save-limit-fix-20260811.py
+      - .github/workflows/config-save-limit-fix-20260811.yml
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fix-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libgl1-mesa-dev
+      - name: Apply remediation
+        run: python3 audit/config-save-limit-fix-20260811.py
+      - name: Validate remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          cargo test --locked --package lvau-core groups::tests::oversized_recipient_group_is_rejected_before_saving
+          cargo test --locked --package lvau-core policy::tests::oversized_policy_is_rejected_before_saving
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo test --locked --workspace --all-features
+          cargo build --locked --workspace --release
+      - name: Commit validated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add crates/lvau-core/src/groups.rs crates/lvau-core/src/policy.rs
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(security): reject oversized configuration saves"
+          git push origin HEAD:security/config-io-20260811
