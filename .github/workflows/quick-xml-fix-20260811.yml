@@ -1,0 +1,94 @@
+name: Quick XML fix 20260811
+
+on:
+  push:
+    branches: [security/quick-xml-20260811]
+    paths:
+      - audit/quick-xml-fix-20260811.py
+      - .github/workflows/quick-xml-fix-20260811.yml
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  remediate-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          components: clippy,rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libgl1-mesa-dev
+
+      - name: Apply dependency remediation
+        run: python3 audit/quick-xml-fix-20260811.py
+
+      - name: Resolve the smallest GUI dependency update
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo update -p eframe --precise 0.33.3
+          cargo update -p egui --precise 0.33.3
+
+      - name: Require patched quick-xml only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          data = tomllib.loads(Path("Cargo.lock").read_text())
+          versions = [p["version"] for p in data["package"] if p["name"] == "quick-xml"]
+          print("quick-xml versions:", versions)
+          if not versions:
+              raise SystemExit("quick-xml unexpectedly absent; inspect dependency graph")
+          def version_tuple(value):
+              return tuple(int(part) for part in value.split(".")[:3])
+          bad = [v for v in versions if version_tuple(v) < (0, 41, 0)]
+          if bad:
+              raise SystemExit(f"vulnerable quick-xml versions remain: {bad}")
+          PY
+          cargo tree --locked -i quick-xml
+
+      - name: Validate workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          git diff --check
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo test --locked --workspace --all-features
+          cargo build --locked --workspace --release
+          cargo run --locked --quiet --package lvau-cli -- self-test
+
+      - name: Audit without quick-xml exceptions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-audit --locked
+          cargo audit --locked
+
+      - name: Commit validated remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add .cargo/audit.toml Cargo.lock crates/lvau-gui/Cargo.toml crates/lvau-stub/Cargo.toml
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No dependency remediation to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(security): eliminate vulnerable quick-xml dependencies"
+          git push origin HEAD:security/quick-xml-20260811
