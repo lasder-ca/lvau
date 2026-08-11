@@ -48,6 +48,9 @@ impl RecipientGroup {
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let content = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize recipient group: {}", e))?;
+        if content.len() as u64 > MAX_RECIPIENT_GROUP_FILE_SIZE {
+            return Err("Recipient group file is too large".into());
+        }
         fs::write(path, content).map_err(|e| format!("Failed to write recipient group file: {}", e))
     }
 
@@ -63,6 +66,22 @@ impl RecipientGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_recipient_group_is_rejected_before_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("group.toml");
+        fs::write(&path, "preserve-me").unwrap();
+        let group = RecipientGroup {
+            name: "x".repeat(MAX_RECIPIENT_GROUP_FILE_SIZE as usize),
+            description: None,
+            recipients: Vec::new(),
+        };
+
+        let error = group.save_to_file(&path).unwrap_err();
+        assert!(error.contains("too large"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "preserve-me");
+    }
 
     #[test]
     fn oversized_recipient_group_is_rejected() {
