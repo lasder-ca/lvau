@@ -1,8 +1,28 @@
 use lvau_protocol::envelope::{AlgorithmId, Envelope, KdfParams, SecurityProfile};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
+
+const MAX_POLICY_FILE_SIZE: u64 = 1024 * 1024;
+
+fn read_policy_file(path: &Path) -> Result<String, String> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let metadata = file.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_POLICY_FILE_SIZE {
+        return Err("Policy file is invalid or too large".into());
+    }
+
+    let mut content = String::new();
+    file.take(MAX_POLICY_FILE_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| e.to_string())?;
+    if content.len() as u64 > MAX_POLICY_FILE_SIZE {
+        return Err("Policy file is invalid or too large".into());
+    }
+    Ok(content)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -79,12 +99,15 @@ impl Default for CapsulePolicy {
 
 impl CapsulePolicy {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let content = read_policy_file(path.as_ref())?;
         toml::from_str(&content).map_err(|e| e.to_string())
     }
 
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let content = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
+        if content.len() as u64 > MAX_POLICY_FILE_SIZE {
+            return Err("Policy file is too large".into());
+        }
         fs::write(path, content).map_err(|e| e.to_string())
     }
 }
@@ -381,6 +404,31 @@ mod tests {
             policy_overridden: false,
             recovery_metadata: None,
         }
+    }
+
+    #[test]
+    fn oversized_policy_is_rejected_before_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.toml");
+        fs::write(&path, "preserve-me").unwrap();
+        let policy = CapsulePolicy {
+            allowed_ciphers: Some(vec!["x".repeat(MAX_POLICY_FILE_SIZE as usize)]),
+            ..CapsulePolicy::default()
+        };
+
+        let error = policy.save_to_file(&path).unwrap_err();
+        assert!(error.contains("too large"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "preserve-me");
+    }
+
+    #[test]
+    fn oversized_policy_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oversized-policy.toml");
+        fs::write(&path, vec![b'x'; MAX_POLICY_FILE_SIZE as usize + 1]).unwrap();
+
+        let error = CapsulePolicy::load_from_file(&path).unwrap_err();
+        assert!(error.contains("too large"));
     }
 
     #[test]
