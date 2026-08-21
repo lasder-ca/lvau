@@ -1,0 +1,129 @@
+name: Temporary Lvau v0.6.0 PR bootstrap
+
+on:
+  pull_request:
+    branches:
+      - master
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.head_ref == 'feat/v0.6.0-v3-streaming' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Extract embedded patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=.github/workflows/v06-integration.yml
+          extract() {
+            local marker="$1" out="$2"
+            awk -v marker="$marker" '
+              index($0, "<<\x27" marker "\x27") { active=1; next }
+              active && $0 ~ "^[[:space:]]*" marker "[[:space:]]*$" { exit }
+              active { sub(/^[[:space:]]+/, ""); print }
+            ' "$src" | base64 -d | gzip -dc > "$out"
+          }
+          extract __IMPL__ /tmp/lvau-v06-impl.patch
+          extract __STREAM__ /tmp/lvau-v06-stream.patch
+          extract __VERSION__ /tmp/lvau-v06-version.patch
+          test -s /tmp/lvau-v06-impl.patch
+          test -s /tmp/lvau-v06-stream.patch
+          test -s /tmp/lvau-v06-version.patch
+          sha256sum /tmp/lvau-v06-*.patch
+
+      - name: Apply implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/lvau-v06-impl.patch
+          git apply /tmp/lvau-v06-impl.patch
+          git apply --check /tmp/lvau-v06-stream.patch
+          git apply /tmp/lvau-v06-stream.patch
+          git apply --check /tmp/lvau-v06-version.patch
+          git apply /tmp/lvau-v06-version.patch
+          git diff --check
+
+      - name: Refresh lockfile
+        run: cargo metadata --format-version 1 >/dev/null
+
+      - name: Format and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo fmt --all --check
+          git diff --check
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --workspace --all-features
+          cargo build --locked --workspace --release
+          cargo tree --duplicates
+          cargo run --locked --quiet --package lvau-cli -- self-test
+
+      - name: CLI roundtrip and tamper checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          printf 'Lvau v0.6.0 PR integration test\n' > "$tmp/plain.txt"
+          printf '%s' 'lvau-v06-ci-only-passphrase' > "$tmp/password.txt"
+          chmod 600 "$tmp/password.txt"
+
+          roundtrip() {
+            local name="$1"
+            shift
+            target/release/lvau-cli encrypt --in-file "$tmp/plain.txt" --out-file "$tmp/$name.lvau" --password-file "$tmp/password.txt" --profile fast "$@"
+            target/release/lvau-cli verify --in-file "$tmp/$name.lvau" --password-file "$tmp/password.txt"
+            target/release/lvau-cli decrypt --in-file "$tmp/$name.lvau" --out-file "$tmp/$name.out" --password-file "$tmp/password.txt"
+            cmp "$tmp/plain.txt" "$tmp/$name.out"
+          }
+          roundtrip v2
+          roundtrip v3-xc20p --format v3 --suite LV3-XC20P
+          roundtrip v3-layered --format v3 --suite LV3-AESGCMSIV-XC20P
+
+          cp "$tmp/v3-xc20p.lvau" "$tmp/tampered.lvau"
+          python3 - "$tmp/tampered.lvau" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          data = bytearray(p.read_bytes())
+          data[-1] ^= 1
+          p.write_bytes(data)
+          PY
+          if target/release/lvau-cli verify --in-file "$tmp/tampered.lvau" --password-file "$tmp/password.txt"; then
+            echo 'tampered v3 capsule unexpectedly verified' >&2
+            exit 1
+          fi
+
+      - name: Commit validated source
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/v06-integration.yml .github/workflows/v06-pr-bootstrap.yml
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: complete experimental v0.6 format v3'
+          git push origin "HEAD:${HEAD_BRANCH}"
