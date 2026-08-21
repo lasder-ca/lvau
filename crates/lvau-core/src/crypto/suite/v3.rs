@@ -304,11 +304,11 @@ mod tests {
 
     fn decode_hex(value: &str) -> Vec<u8> {
         assert_eq!(value.len() % 2, 0);
-        value
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let pair = std::str::from_utf8(pair).expect("ASCII hex");
+        let bytes = value.as_bytes();
+        (0..bytes.len())
+            .step_by(2)
+            .map(|start| {
+                let pair = std::str::from_utf8(&bytes[start..start + 2]).expect("ASCII hex");
                 u8::from_str_radix(pair, 16).expect("valid hex")
             })
             .collect()
