@@ -178,6 +178,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
@@ -210,6 +211,16 @@ jobs:
             artifacts/*.zip
             artifacts/checksums.txt
             artifacts/sbom/*.cdx.json
+      - name: Require release tag to remain current master
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          master_sha="$(git rev-parse origin/master)"
+          test "${GITHUB_SHA}" = "${master_sha}" || {
+            echo "release tag is no longer current master (${master_sha}), got ${GITHUB_SHA}" >&2
+            exit 1
+          }
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
