@@ -2,7 +2,7 @@
   <img src="./assets/lvau-wordmark.svg" alt="Lvau" width="340">
 </h1>
 
-<p align="center"><strong>ローカルファイルを暗号化し、形式や公開情報をあとから確認できる暗号化カプセル。</strong></p>
+<p align="center"><strong>ローカルファイルを暗号化する。</strong></p>
 
 <p align="center"><a href="README.md">English</a> · 日本語</p>
 
