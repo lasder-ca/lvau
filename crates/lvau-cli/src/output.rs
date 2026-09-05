@@ -1,5 +1,4 @@
 use serde::Serialize;
-use std::io::{self, Write};
 
 pub const JSON_SCHEMA_VERSION: u32 = 1;
 
@@ -11,20 +10,6 @@ struct JsonEnvelope<'a, T: Serialize> {
     data: &'a T,
 }
 
-#[derive(Serialize)]
-struct JsonErrorEnvelope<'a> {
-    schema_version: u32,
-    command: &'a str,
-    status: &'static str,
-    error: JsonError<'a>,
-}
-
-#[derive(Serialize)]
-struct JsonError<'a> {
-    code: &'a str,
-    message: &'a str,
-}
-
 /// Print one stable, versioned success document to stdout.
 pub fn print_success<T: Serialize>(command: &str, data: &T) -> Result<(), serde_json::Error> {
     let envelope = JsonEnvelope {
@@ -34,22 +19,6 @@ pub fn print_success<T: Serialize>(command: &str, data: &T) -> Result<(), serde_
         data,
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
-    Ok(())
-}
-
-/// Print one stable, versioned error document to stderr.
-///
-/// Command handlers may adopt this while preserving their existing exit codes.
-#[allow(dead_code)]
-pub fn print_error(command: &str, code: &str, message: &str) -> Result<(), serde_json::Error> {
-    let envelope = JsonErrorEnvelope {
-        schema_version: JSON_SCHEMA_VERSION,
-        command,
-        status: "error",
-        error: JsonError { code, message },
-    };
-    let encoded = serde_json::to_string_pretty(&envelope)?;
-    let _ = writeln!(io::stderr(), "{encoded}");
     Ok(())
 }
 
