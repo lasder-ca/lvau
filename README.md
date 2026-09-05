@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="./assets/lvau-icon.svg" alt="Lvau" width="128" height="128">
-</p>
-
-<h1 align="center">Lvau</h1>
+<h1 align="center">
+  <img src="./assets/lvau-wordmark.svg" alt="Lvau" width="340">
+</h1>
 
 <p align="center"><strong>Inspectable encrypted capsules for local files and developer workflows.</strong></p>
 
@@ -63,10 +61,12 @@ Automation-facing JSON uses a versioned top-level envelope where implemented. Se
 
 ## Brand assets
 
-- [`assets/lvau-icon.svg`](./assets/lvau-icon.svg) — primary icon for README, product, and website surfaces.
-- [`assets/favicon.svg`](./assets/favicon.svg) — compact browser and site icon.
+- [`assets/lvau-wordmark.svg`](./assets/lvau-wordmark.svg) — primary lowercase wordmark for README and wider brand surfaces.
+- [`assets/lvau-icon.svg`](./assets/lvau-icon.svg) — rounded product/app icon using the Lvau monogram.
+- [`assets/lvau-symbol.svg`](./assets/lvau-symbol.svg) — transparent monochrome monogram for compact placements.
+- [`assets/favicon.svg`](./assets/favicon.svg) — high-contrast browser and small-size icon.
 
-Both files are flat SVGs with transparent backgrounds and use only the project navy and muted teal palette.
+The identity is deliberately neutral and monochrome: warm off-white with near-black, with light/dark-aware SVG variants where appropriate. The marks are vector paths and do not depend on external fonts.
 
 ## Build from source
 

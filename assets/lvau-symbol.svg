@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lvau symbol</title>
+  <desc id="desc">Monochrome Lvau monogram.</desc>
+  <style>
+    .mark { fill: #151515; }
+    @media (prefers-color-scheme: dark) { .mark { fill: #f5f2ec; } }
+  </style>
+  <path class="mark" d="M154 72h54v202c0 57 27 84 84 84h36v54h-42c-88 0-132-45-132-134V72Z"/>
+  <path class="mark" d="M224 142c57 8 102 50 129 106l58 120-51 26-55-115c-22-46-46-75-81-86v-51Z"/>
+</svg>
