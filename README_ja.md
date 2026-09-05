@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="./assets/lvau-icon.svg" alt="Lvau" width="128" height="128">
-</p>
-
-<h1 align="center">Lvau</h1>
+<h1 align="center">
+  <img src="./assets/lvau-wordmark.svg" alt="Lvau" width="340">
+</h1>
 
 <p align="center"><strong>ローカルファイルを暗号化し、形式や公開情報をあとから確認できる暗号化カプセル。</strong></p>
 
@@ -61,10 +59,12 @@ Windowsでは、Lvauを実行するアカウントだけが読めるようにパ
 
 ## ブランド素材
 
-- [`assets/lvau-icon.svg`](./assets/lvau-icon.svg) — README、製品画面、サイト向けの基本アイコン。
-- [`assets/favicon.svg`](./assets/favicon.svg) — faviconや小さい表示向け。
+- [`assets/lvau-wordmark.svg`](./assets/lvau-wordmark.svg) — READMEや横長の表示に使う基本ワードマーク。
+- [`assets/lvau-icon.svg`](./assets/lvau-icon.svg) — Lvauモノグラムを使った角丸の製品・アプリアイコン。
+- [`assets/lvau-symbol.svg`](./assets/lvau-symbol.svg) — 小さい表示向けの透明背景・単色モノグラム。
+- [`assets/favicon.svg`](./assets/favicon.svg) — ブラウザや極小表示向けの高コントラストアイコン。
 
-どちらも透明背景のフラットなSVGで、濃紺と落ち着いた青緑だけを使用しています。
+新しいブランドは、暖かいオフホワイトとほぼ黒のニュートラルな単色構成です。必要なSVGはライト・ダーク表示に対応し、すべてパスで構成しているため外部フォントには依存しません。
 
 ## ソースからビルド
 

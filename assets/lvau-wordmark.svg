@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 220" role="img" aria-labelledby="title desc">
+  <title id="title">lvau</title>
+  <desc id="desc">Custom lowercase Lvau wordmark.</desc>
+  <style>
+    .wordmark { fill: none; stroke: #151515; stroke-width: 28; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) { .wordmark { stroke: #f5f2ec; } }
+  </style>
+  <g class="wordmark">
+    <path stroke-linecap="butt" d="M62 26v118c0 34 17 50 51 50h17"/>
+    <path stroke-linecap="round" d="M150 84l67 104c5 8 16 8 21 0l78-132"/>
+    <path stroke-linecap="round" d="M418 87c-14-14-33-22-54-22-43 0-77 29-77 65s34 65 77 65c21 0 40-8 54-22"/>
+    <path stroke-linecap="butt" d="M418 66v129"/>
+    <path stroke-linecap="butt" d="M474 70v70c0 36 24 55 61 55 38 0 63-19 63-55V70"/>
+  </g>
+</svg>
