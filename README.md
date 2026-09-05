@@ -2,7 +2,7 @@
   <img src="./assets/lvau-wordmark.svg" alt="Lvau" width="340">
 </h1>
 
-<p align="center"><strong>Inspectable encrypted capsules for local files and developer workflows.</strong></p>
+<p align="center"><strong>Encrypt local files.</strong></p>
 
 <p align="center">English · <a href="README_ja.md">日本語</a></p>
 
